@@ -1,0 +1,1 @@
+- [Coach Tab Sprint Review](project_coach-tab-sprint.md) — Pre-build privacy/security review; blockers and accepted risks for first network-connected feature
