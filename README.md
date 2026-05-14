@@ -1,0 +1,92 @@
+# Life Compass
+
+A personal life planning and coaching tool built with React + TypeScript. Implements the full OKR hierarchy from EWMBA 258 (Becoming Superhuman) — from deathbed goals down to daily MITs — with an AI coach grounded in the class frameworks.
+
+Built entirely using Claude Code and a team of specialized AI agents.
+
+---
+
+## What it does
+
+- **Setup** — define your life dimensions, deathbed goals, and annual OKRs
+- **Plan** — build your full OKR tree: Annual → Quarterly → Monthly KRs → Weekly Initiatives
+- **Today** — surface your 3 Most Important Tasks daily, linked to your initiatives. Mark each as Done, Carry Forward, or Drop at end of day. Log mood, exercise, and a daily reflection.
+- **Coach** — AI coach with full context of your goals, MITs, and OKR tree. Grounded in 7 frameworks from EWMBA 258: MIT, FOCUS Protocol, Mental Contrasting, Yerkes-Dodson, Type 1 vs Type 2 decisions, MVOs, and anti-perfectionism.
+- **Review** — weekly MIT completion, mood trends, monthly OKR progress, and dimension weight vs actual time distribution.
+
+---
+
+## Frameworks baked in
+
+From EWMBA 258 — Becoming Superhuman:
+
+- **OKR Hierarchy** — Annual → Quarterly → Monthly → Weekly → Daily. Every MIT traces back to a deathbed goal.
+- **MIT Framework** — 1-3 Most Important Tasks daily. Incomplete MITs carry over (Zeigarnik Effect).
+- **FOCUS Protocol** — Find / Outline / Cut / Use 50-min timer / Stop.
+- **Mental Contrasting** — contrast goal state vs current state daily.
+- **Yerkes-Dodson** — regulate brain state before cognitive work.
+- **Type 1 vs Type 2 decisions** — irreversible vs reversible. Move fast on Type 2.
+- **MVOs** — Minimum Viable Outputs. Antidote to perfectionism.
+
+---
+
+## Setup
+
+### Prerequisites
+- Node.js 18+
+- An Anthropic API key (for the Coach tab) — get one at [console.anthropic.com](https://console.anthropic.com)
+
+### Run locally
+
+```bash
+git clone https://github.com/Mg19703/life-compass.git
+cd life-compass
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` in your browser.
+
+### First run
+1. Go to the **Setup** tab
+2. Enter your name and role
+3. Fill in your deathbed goals (the 7 priorities exercise from class)
+4. Enter your Anthropic API key
+5. Go to **Plan** and build your OKR tree
+6. Come back to **Today** and add your first MITs
+
+---
+
+## Stack
+
+- React + TypeScript + Vite
+- localStorage for persistence
+- Anthropic Claude API for the Coach tab
+- No backend, no database, no auth — runs entirely in your browser
+
+---
+
+## Built with
+
+Claude Code + a team of specialized AI agents:
+- System Analyst — spec and story breakdown
+- UX Flow Architect — navigation and empty state review
+- Test Architect — acceptance criteria and edge case validation
+- Spaghetti Code Guardian — code quality audit
+- CTO Advisor — architecture validation
+- Product Counsel — privacy and compliance review
+- Premium Product Designer — UI fidelity review
+
+---
+
+## Status
+
+v1 — MVP complete. All 29 stories shipped.
+
+v2 in progress: Habit Tracker, streak tracking, coach tool-calling, MIT suggestions, weekly review prompt, deathbed goal alignment score.
+
+---
+
+## Note on API keys
+
+Your Anthropic API key is stored in your browser's localStorage only. It is never sent anywhere except directly to the Anthropic API. Do not commit it to any file.
