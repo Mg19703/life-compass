@@ -69,9 +69,13 @@ Claude Code + a team of specialized AI agents.
 
 ## Status
 
-v1 — MVP complete. All 29 stories shipped.
+v2 complete. 43 stories shipped across 11 epics.
 
-v2 in progress: Habit Tracker, streak tracking, coach tool-calling, MIT suggestions, weekly review prompt, deathbed goal alignment score.
+**v1 features:** Setup, Plan (full OKR tree), Today (MITs, carryover, daily log), Coach (context-aware AI grounded in 7 class frameworks), Review (weekly MIT completion, mood trends, monthly OKR progress, dimension weight distribution).
+
+**v2 features:** Habits tab (daily habit tracking, streaks, archive), streak summary on Today tab, coach tool-calling (Suggest MITs, Weekly Review, confirm-before-apply proposal cards), deathbed goal alignment in Review tab, UI polish (shared DateNavBar, plan nesting levels, mood labels, progress bars, prompt chips).
+
+v3 in progress: hierarchical initiative dropdown, MIT initiative editing, tab bar MIT count, coach OKR management, coach MIT edit/delete, MIT subtasks.
 
 ---
 
