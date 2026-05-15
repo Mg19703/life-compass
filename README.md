@@ -22,11 +22,6 @@ From EWMBA 258 — Becoming Superhuman:
 
 - **OKR Hierarchy** — Annual → Quarterly → Monthly → Weekly → Daily. Every MIT traces back to a deathbed goal.
 - **MIT Framework** — 1-3 Most Important Tasks daily. Incomplete MITs carry over (Zeigarnik Effect).
-- **FOCUS Protocol** — Find / Outline / Cut / Use 50-min timer / Stop.
-- **Mental Contrasting** — contrast goal state vs current state daily.
-- **Yerkes-Dodson** — regulate brain state before cognitive work.
-- **Type 1 vs Type 2 decisions** — irreversible vs reversible. Move fast on Type 2.
-- **MVOs** — Minimum Viable Outputs. Antidote to perfectionism.
 
 ---
 
@@ -68,14 +63,7 @@ Open `http://localhost:5173` in your browser.
 
 ## Built with
 
-Claude Code + a team of specialized AI agents:
-- System Analyst — spec and story breakdown
-- UX Flow Architect — navigation and empty state review
-- Test Architect — acceptance criteria and edge case validation
-- Spaghetti Code Guardian — code quality audit
-- CTO Advisor — architecture validation
-- Product Counsel — privacy and compliance review
-- Premium Product Designer — UI fidelity review
+Claude Code + a team of specialized AI agents.
 
 ---
 
