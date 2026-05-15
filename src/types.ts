@@ -2,7 +2,7 @@
 type ISODate = string;
 
 // Five application tabs
-export type TabId = 'setup' | 'today' | 'plan' | 'coach' | 'review';
+export type TabId = 'setup' | 'today' | 'plan' | 'coach' | 'review' | 'habits';
 
 // Props shared by all tab components
 export interface TabProps {
@@ -78,6 +78,23 @@ export interface DailyLog {
   exercise: Exercise | null;
 }
 
+// v2: Habits (recurring daily behaviors, separate from MITs and OKRs)
+export interface Habit {
+  id: string;
+  name: string;           // user-defined label, max 80 chars
+  dimensionId: DimensionId;
+  createdAt: ISODate;     // YYYY-MM-DD when habit was created
+  archivedAt: ISODate | null; // null = active; date string = archived
+}
+
+// v2: Daily check-in log for a single habit on a single date
+export interface HabitLog {
+  id: string;
+  habitId: string;
+  date: ISODate;          // YYYY-MM-DD
+  completed: boolean;
+}
+
 // Six fixed life dimensions — not user-editable
 export type DimensionId =
   | 'inner-life'
@@ -105,4 +122,7 @@ export interface AppState {
   dailyMITs: DailyMIT[]; // flat array, queried by .date field
   dailyLogs: Record<ISODate, DailyLog>; // keyed by YYYY-MM-DD
   apiKey: string | null;
+  // v2 additions
+  habits: Habit[];        // all habits (active and archived); archivedAt===null means active
+  habitLogs: HabitLog[];  // flat array, queried by .habitId and .date
 }

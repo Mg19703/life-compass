@@ -99,6 +99,7 @@ EPIC-011 Review — Deathbed Alignment
 - [ ] All existing v1 keys (`annualOKRs`, `dailyMITs`, etc.) are preserved verbatim — migration adds fields, never removes or rewrites
 - [ ] Migration does not throw for any valid v1 payload; malformed payloads fall back to the existing corrupt-data path (already handled in STORY-002)
 - [ ] After migration, `saveState` writes a v2 payload — the user will not be migrated again on next load
+- [ ] `defaults.ts` (SCHEMA_VERSION bump to 2 + `habits: []` and `habitLogs: []` in DEFAULT_APP_STATE) and `migrations.ts` (migrateV1toV2 function) must be updated in the same atomic commit — splitting them risks stamping schemaVersion:2 onto state missing the new fields, which prevents re-migration on next load
 
 **Size:** S | **Dependencies:** STORY-030, STORY-003 (v1 useAppState)
 
@@ -111,12 +112,15 @@ EPIC-011 Review — Deathbed Alignment
 
 **Acceptance criteria:**
 - [ ] `calculateStreak(habitId: string, habitLogs: HabitLog[], today: ISODate): number` exported from `src/coach/habitUtils.ts` (new file)
-- [ ] Streak = the longest consecutive run of days ending on or before `today` where `HabitLog.completed === true` for the given `habitId`
+- [ ] Streak = the **current active run** of completed days ending on or before `today` — not the historical all-time maximum; "longest" in prior drafts meant the active backward run from today, not a global max
 - [ ] A day with no `HabitLog` entry counts as not completed (breaks the streak)
 - [ ] `today` is the anchor: if the habit was not logged today, the streak counts consecutive completed days ending on `today - 1`; if today is completed, it counts from today backward
+- [ ] Future-dated logs (date > today) are ignored entirely
+- [ ] Duplicate HabitLog entries for the same habitId + date: day is treated as completed if any entry has `completed === true`
+- [ ] If HabitLog entries exist but none match the given `habitId`, returns 0
 - [ ] Returns 0 if there are no completed logs
 - [ ] Function is pure (no side effects, no API calls, deterministic for same inputs)
-- [ ] Unit tests cover: zero logs → 0; single day completed → 1; three-day run → 3; gap in middle breaks streak; streak anchored to today vs. today-1 correctly
+- [ ] Manual test cases: zero logs → 0; single day completed → 1; three-day run → 3; gap in middle breaks streak; streak anchored correctly to today vs. today-1; habitId with no matching logs → 0; future-dated log ignored; duplicate log for same day → completed
 - [ ] `calculateStreak` is re-exported from a barrel `src/coach/index.ts` alongside existing coach exports (or added to the existing barrel if one exists)
 
 **Size:** S | **Dependencies:** STORY-030
@@ -143,6 +147,7 @@ EPIC-011 Review — Deathbed Alignment
 - [ ] Active tab styling (amber underline) applies to Habits tab correctly
 - [ ] Tab bar does not overflow or wrap at 1280px with 6 tabs
 - [ ] First-load default tab logic unchanged: still opens Setup if `profile` is null
+- [ ] App.tsx updated: `'habits'` added to the `TABS` array and a sixth `{activeTab === 'habits' && <ErrorBoundary tabLevel><HabitsTab /></ErrorBoundary>}` render branch added — this story is not complete until App.tsx renders the tab
 
 **Size:** S | **Dependencies:** STORY-026 (v1 shell), STORY-030
 
@@ -164,6 +169,7 @@ EPIC-011 Review — Deathbed Alignment
 - [ ] Archived habits shown in a collapsed "Archived" section below the active table; can be unarchived (sets `archivedAt` back to null)
 - [ ] Empty state (no active habits): "No habits yet — add one above."
 - [ ] Archived section hidden entirely if no archived habits exist
+- [ ] If a habit is in inline edit mode when Archive or Delete is triggered, the edit is cancelled (discarded) before the action executes — edit and archive/delete are mutually exclusive
 
 **Size:** M | **Dependencies:** STORY-031, STORY-032, STORY-033
 
@@ -184,6 +190,8 @@ EPIC-011 Review — Deathbed Alignment
 - [ ] Streak count updates immediately after check/uncheck without page reload
 - [ ] Historical dates labeled "(Past)" in muted text beside the date header
 - [ ] Empty state (no active habits): "Add habits above to start your daily check-in."
+- [ ] HabitLog upsert spreads the full `habitLogs` array per the updateState array-replacement contract; a naive `updateState({ habitLogs: [newLog] })` would wipe all prior logs
+- [ ] Toggle handler reads `habitLogs` from AppState at call time (not from a stale closure); rapid double-toggle does not create duplicate records
 
 **Size:** M | **Dependencies:** STORY-034
 
@@ -218,6 +226,8 @@ EPIC-011 Review — Deathbed Alignment
 - [ ] Section header: "Habit Streaks"
 - [ ] Streak counts computed via `calculateStreak`; anchored to today's date
 - [ ] Section is read-only for habit management — no add/edit/archive controls; "Manage habits →" link navigates to Habits tab
+- [ ] Habit circle toggles always write to the current calendar date (`todayISO()`), regardless of TodayTab's `activeDate` — if the user is viewing a past date, the toggle still targets today; this is intentional and must be verified manually
+- [ ] App.tsx passes `navigateToHabits: () => void` to TodayTab; TodayTab uses it for the "Manage habits →" link; pattern mirrors the existing `navigateToPlan` prop already wired in App.tsx
 
 **Size:** M | **Dependencies:** STORY-032, STORY-035, STORY-017 (Today tab layout)
 
@@ -244,6 +254,7 @@ EPIC-011 Review — Deathbed Alignment
 - [ ] "Today" for this section uses the same `now` parameter already in `buildCoachContext` — no new clock dependency
 - [ ] If `habits` is empty or all habits are archived, section reads: "No active habits configured."
 - [ ] Section added after the Dimension Distribution section (last in payload) to preserve token order
+- [ ] If active habits exceed 20, truncate to the first 20 by array insertion order (not sorted by streak or name); log `console.warn` in all environments (not only DEV) when truncation occurs
 - [ ] Estimated payload increase: ≤200 tokens for 10 active habits — acceptable within the 8,000-token budget
 
 **Size:** S | **Dependencies:** STORY-018 (v1 buildCoachContext), STORY-032
@@ -263,7 +274,14 @@ EPIC-011 Review — Deathbed Alignment
 - [ ] Each row has an "Add to Today" button; clicking it adds that MIT text to `AppState.dailyMITs` for today's date with `status: 'pending'` and `initiativeId: null` via `updateState`
 - [ ] "Add to Today" is disabled if today already has 3 manually-created MITs (the 3-MIT cap applies here too)
 - [ ] After clicking "Add to Today", the button changes to "Added" (disabled, green text); clicking a different row's "Add to Today" is still allowed
-- [ ] If the API returns text that cannot be parsed into exactly 3 numbered items, the response is rendered as a plain chat bubble (graceful fallback, no crash)
+- [ ] Parse strategy: split response on newlines, match lines beginning with `1.` / `2.` / `3.` (digit-dot prefix); fewer than 3 matched lines → fallback to plain chat bubble (no crash)
+- [ ] A new "Suggest MITs" response replaces the existing ProposalCard in the chat thread; prior ProposalCards are not retained
+- [ ] Coach-proposed MITs added via "Add to Today" count against the 3-MIT daily cap — they have `carriedOverFrom: null`, making them indistinguishable from manual MITs by design
+- [ ] Cap check evaluates `AppState` at click time; after each add, all remaining "Add to Today" buttons in the same card re-evaluate the cap against the updated MIT count — if the 3rd slot is now full, remaining buttons disable immediately without a page reload
+- [ ] "Added" state (green disabled button) is ephemeral React local state — navigating away from the Coach tab and returning resets it; this is intentional given localStorage-only storage
+- [ ] The full line (MIT text + rationale sentence) is written to AppState as the MIT's `text` field; the rationale is not stripped — the user edits it directly in Today tab if needed
+- [ ] "Add to Today" always targets the current calendar date, not TodayTab's `activeDate`
+- [ ] A single `loading` boolean in CoachTab governs all three input methods (chat send, Suggest MITs, Weekly Review) — no concurrent API calls permitted
 - [ ] API key absent or setup incomplete: button disabled with tooltip "Complete Setup first"
 
 **Size:** M | **Dependencies:** STORY-020 (callCoach), STORY-021 (Coach UI), STORY-038, STORY-014 (DailyMIT write)
@@ -280,7 +298,8 @@ EPIC-011 Review — Deathbed Alignment
 - [ ] Clicking the button sends a pre-written prompt to the Claude API: "Review my week. Analyze: (1) MIT completion rate and patterns, (2) habit streak performance, (3) alignment between my dimension weights and actual completed MITs, (4) one key adjustment to make next week. Be concise — no more than 250 words total."
 - [ ] While loading, button disabled and shows "Thinking..."
 - [ ] Response renders as a **proposal card** in the chat thread with a "Weekly Review" header and four labeled sub-sections matching the four prompt points: "MIT Completion", "Habit Streaks", "Dimension Alignment", "Next Week Adjustment"
-- [ ] If the API response cannot be parsed into 4 labeled sections, it is rendered as a plain chat bubble (graceful fallback)
+- [ ] Parse strategy: use case-insensitive substring matching against the four display labels ("MIT Completion", "Habit Streaks", "Dimension Alignment", "Next Week Adjustment") as section anchors; minor Claude rephrasing of headers does not trigger fallback
+- [ ] If fewer than 4 sections are found after parsing, render as a plain chat bubble; the fallback bubble shows a muted note: "Could not format as structured review."
 - [ ] Proposal card is read-only — no "Add to Today" or apply actions
 - [ ] API key absent or setup incomplete: button disabled with tooltip "Complete Setup first"
 - [ ] Both "Suggest MITs" and "Weekly Review" buttons fit in the Coach tab header at 1280px without wrapping
@@ -332,9 +351,11 @@ Note: STORY-041 should be built before STORY-039 and STORY-040; both depend on i
   - "Absent" (red dot): 0 KRs exist in this goal's dimension for the selected month
 - [ ] Dimension mapping for alignment: each deathbed goal slot (1–7) is mapped to a life dimension by the user — but since v1 has no explicit goal-to-dimension mapping, use a fallback: display all 6 dimensions as rows, each showing its deathbed goal text if the user has filled it in (Goal 1 → Inner Life, Goal 2 → Relationships, Goal 3 → Health, Goal 4 → Financial Security, Goal 5 → Service, Goal 6 → Learning & Growth, Goal 7 → "Uncategorized / Other")
 - [ ] If deathbed goal slot is empty (empty string), the row still appears but "Deathbed Goal" cell shows "(not set)" in muted gray italic
-- [ ] If no deathbed goals have been set at all, section shows: "Set your deathbed goals in Setup to see alignment."
+- [ ] The two display conditions evaluate in strict order: **(1)** if ALL `deathbedGoals` are empty strings → show "Set your deathbed goals in Setup to see alignment." and stop; **(2)** if selected month has no KRs AND no MITs → hide section entirely; both conditions checked before rendering the table
 - [ ] Table is read-only; "Edit goals →" link navigates to Setup tab
-- [ ] Section hidden entirely if selected month has no KRs and no MITs (no data = no alignment to show)
+- [ ] Section hidden entirely if selected month has no KRs AND no MITs (strict AND, not OR — a month with KRs but zero MITs still shows the table with "Planned"/"Absent" statuses)
+- [ ] MITs with `initiativeId: null` do not count toward "Related Completed MITs" — same exclusion rule as `calcDimDistribution` in ReviewTab; only MITs traceable through the initiative chain are counted
+- [ ] Row 7 ("Uncategorized / Other"): always shows 0 KRs and 0 MITs (no dimension mapping exists); Alignment Status is always "Absent" with muted tooltip text: "This goal has no dimension mapping."
 
 **Size:** M | **Dependencies:** STORY-005 (deathbed goals), STORY-024 (monthly OKR progress + month selector), STORY-014 (DailyMIT with initiativeId for tracing)
 

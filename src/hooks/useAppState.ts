@@ -28,10 +28,22 @@ export function useAppState(): {
     initialized.current = true;
 
     const loaded = loadState();
-    if (loaded.schemaVersion !== SCHEMA_VERSION) {
-      return migrate(loaded);
+
+    // Normalize v2 array fields before the migration guard.
+    // loadState() casts raw JSON directly to AppState — if the stored state has
+    // schemaVersion:2 but was saved before habits/habitLogs were added (e.g. during
+    // an incremental dev cycle), the migration guard fires false and the app receives
+    // an object with undefined arrays. This guard makes loading safe regardless.
+    const normalized: typeof loaded = {
+      ...loaded,
+      habits:    Array.isArray(loaded.habits)    ? loaded.habits    : [],
+      habitLogs: Array.isArray(loaded.habitLogs) ? loaded.habitLogs : [],
+    };
+
+    if (normalized.schemaVersion !== SCHEMA_VERSION) {
+      return migrate(normalized);
     }
-    return loaded;
+    return normalized;
   });
 
   // Tracks the latest state synchronously — updated only inside the setState

@@ -176,9 +176,9 @@ function WeeklyInitiativesSection({ krId, state, updateState }: { krId: string }
       </button>
 
       {expanded && (
-        <div className="nested-content">
+        <div className="nested-content" style={{ background: 'color-mix(in srgb, var(--color-border) 25%, var(--color-surface))' }}>
           {initiatives.length === 0
-            ? <EmptyState message="No initiatives this week — add one above." />
+            ? <EmptyState message="No initiatives this week — add one below." />
             : (
               <table className="table-base" style={{ marginBottom: 10 }}>
                 <thead><tr><th>Week of</th><th>Initiative</th><th style={{ width: 40 }}>Done</th><th style={{ width: 32 }}></th></tr></thead>
@@ -267,9 +267,9 @@ function MonthlyKRsSection({ qoId, qoYear, state, updateState }: { qoId: string;
       </button>
 
       {expanded && (
-        <div className="nested-content">
+        <div className="nested-content" style={{ background: 'color-mix(in srgb, var(--color-border) 12%, var(--color-surface))' }}>
           {krs.length === 0
-            ? <EmptyState message="No key results yet — add one above." />
+            ? <EmptyState message="No key results yet — add one below." />
             : (
               <table className="table-base" style={{ marginBottom: 10 }}>
                 <thead><tr><th>Month</th><th>Key Result</th><th>Progress</th><th></th></tr></thead>
@@ -372,7 +372,7 @@ function QuarterlyObjectivesSection({ annualOKRId, parentYear, autoExpand, state
       </button>
 
       {expanded && (
-        <div className="nested-content">
+        <div className="nested-content" style={{ background: 'var(--color-surface)' }}>
           {qos.length === 0
             ? <EmptyState message="No quarterly objectives yet — use the form below to add one." />
             : (
@@ -462,7 +462,7 @@ function AnnualOKRsSection({ dimensionId, targetQOId, state, updateState }: { di
   return (
     <div style={{ marginBottom: 24 }}>
       {okrs.length === 0
-        ? <EmptyState message="No annual OKR yet — add one above." />
+        ? <EmptyState message="No annual OKR yet — add one below." />
         : (
           <table className="table-base" style={{ marginBottom: 10 }}>
             <thead><tr><th>Objective</th><th>Year</th><th></th></tr></thead>
@@ -540,6 +540,15 @@ export function PlanTab({ state, updateState, navTarget, onNavConsumed }: PlanTa
       onNavConsumed?.();
     }
   }, [navTarget, onNavConsumed]);
+
+  // Reset targetQOId one frame after autoExpand fires so a stale ID doesn't
+  // re-trigger expansion if the user navigates away and returns to Plan later.
+  useEffect(() => {
+    if (targetQOId) {
+      const frame = requestAnimationFrame(() => setTargetQOId(null));
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [targetQOId]);
 
   const hasAnyOKR = state.annualOKRs.length > 0;
   const visibleDimensions = filter === 'all'

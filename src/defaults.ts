@@ -1,6 +1,6 @@
 import type { AppState, LifeDimension } from './types';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const LIFE_DIMENSIONS: LifeDimension[] = [
   {
@@ -52,4 +52,6 @@ export const DEFAULT_APP_STATE: AppState = {
   dailyMITs: [],
   dailyLogs: {},
   apiKey: null,
+  habits: [],
+  habitLogs: [],
 };

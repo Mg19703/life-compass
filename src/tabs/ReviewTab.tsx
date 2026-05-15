@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { AppState, TabProps, PlanNavTarget, DimensionId } from '../types';
 import { LIFE_DIMENSIONS } from '../defaults';
 import { EmptyState } from '../components/EmptyState';
+import { DateNavBar } from '../components/DateNavBar';
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -110,10 +111,8 @@ function DimensionDistributionTable({ state, start, end }: { state: AppState; st
   const dotColor = { green: 'var(--color-success)', amber: 'var(--color-accent)', red: 'var(--color-danger)' } as const;
 
   return (
-    <div style={{ marginTop: 16 }}>
-      <p style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
-        Dimension Alignment
-      </p>
+    <div>
+      <p className="sub-section-label">Dimension Alignment</p>
       <table className="table-base">
         <thead>
           <tr>
@@ -235,7 +234,8 @@ function WeeklyMoodTable({ weekStart, state }: { weekStart: string; state: AppSt
 
   return (
     <>
-      <table className="table-base" style={{ marginTop: 16 }}>
+      <p className="sub-section-label">Daily Mood &amp; Exercise</p>
+      <table className="table-base">
         <thead>
           <tr><th>Day</th><th>Mood</th><th>Exercise</th><th>Reflection</th></tr>
         </thead>
@@ -350,11 +350,18 @@ function MonthlyOKRTable({
             <td>{row.kr.keyResult}</td>
             <td style={{ color: 'var(--color-text-muted)' }}>{row.total || '—'}</td>
             <td style={{ color: 'var(--color-text-muted)' }}>{row.total > 0 ? row.done : '—'}</td>
-            <td style={{ color: pctColor(row.pct), fontWeight: 600, whiteSpace: 'nowrap' }}>
-              {row.pct === null ? '—' : `${row.pct}%`}
+            <td style={{ whiteSpace: 'nowrap' }}>
+              <span style={{ color: pctColor(row.pct), fontWeight: 600 }}>
+                {row.pct === null ? '—' : `${row.pct}%`}
+              </span>
+              {row.pct !== null && (
+                <div style={{ marginTop: 3, height: 4, borderRadius: 2, background: 'var(--color-border)', overflow: 'hidden', minWidth: 56 }}>
+                  <div style={{ height: '100%', width: `${row.pct}%`, background: pctColor(row.pct), borderRadius: 2, transition: 'width 0.2s ease' }} />
+                </div>
+              )}
             </td>
             <td>
-              {row.pct !== null && row.pct < 40 && row.qoId && (
+              {(row.pct === null || row.pct < 40) && row.qoId && (
                 <button className="btn-ghost"
                   style={{ fontSize: 11, padding: '1px 8px', color: 'var(--color-accent)', borderColor: 'var(--color-accent)' }}
                   onClick={() => navigateToPlan({ dimensionId: row.dimId, quarterlyObjectiveId: row.qoId })}>
@@ -369,13 +376,159 @@ function MonthlyOKRTable({
   );
 }
 
-// ─── STORY-025: Review Tab Assembly ──────────────────────────────────────────
+// ─── STORY-042: Deathbed alignment helpers ────────────────────────────────────
+
+// Counts completed MITs per dimensionId for a given date range.
+// MITs with initiativeId:null are excluded — same rule as calcDimDistribution.
+function mitCountsByDimension(state: AppState, start: string, end: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  const linked = state.dailyMITs.filter(m =>
+    m.status === 'complete' && m.initiativeId !== null &&
+    m.date >= start && m.date <= end
+  );
+  for (const mit of linked) {
+    const init = state.weeklyInitiatives.find(i => i.id === mit.initiativeId);
+    if (!init) continue;
+    const kr   = state.monthlyKRs.find(k => k.id === init.monthlyKRId);
+    if (!kr)   continue;
+    const qo   = state.quarterlyObjectives.find(q => q.id === kr.quarterlyObjectiveId);
+    if (!qo)   continue;
+    const okr  = state.annualOKRs.find(o => o.id === qo.annualOKRId);
+    if (!okr)  continue;
+    counts.set(okr.dimensionId, (counts.get(okr.dimensionId) ?? 0) + 1);
+  }
+  return counts;
+}
+
+// Counts monthly KRs per dimensionId for a given month/year.
+function krCountsByDimension(state: AppState, year: number, month: number): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const kr of state.monthlyKRs.filter(k => k.year === year && k.month === month)) {
+    const qo  = state.quarterlyObjectives.find(q => q.id === kr.quarterlyObjectiveId);
+    if (!qo)  continue;
+    const okr = state.annualOKRs.find(o => o.id === qo.annualOKRId);
+    if (!okr) continue;
+    counts.set(okr.dimensionId, (counts.get(okr.dimensionId) ?? 0) + 1);
+  }
+  return counts;
+}
+
+// ─── STORY-042: Deathbed Alignment Section ────────────────────────────────────
+
+function DeathbedAlignmentSection({
+  state, year, month, start, end, navigateToSetup,
+}: {
+  state: AppState; year: number; month: number;
+  start: string; end: string; navigateToSetup: () => void;
+}) {
+  // Condition 1 (checked first): all goals empty
+  const allGoalsEmpty = state.deathbedGoals.every(g => !g.trim());
+  if (allGoalsEmpty) {
+    return (
+      <div style={{ color: 'var(--color-text-muted)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 10, padding: '16px 0 8px' }}>
+        Set your deathbed goals in Setup to see alignment.
+        <button className="btn-ghost" style={{ fontSize: 12, padding: '1px 8px' }} onClick={navigateToSetup}>
+          Edit goals →
+        </button>
+      </div>
+    );
+  }
+
+  // Condition 2: no data for this month → show a placeholder rather than silently
+  // hiding the section (full hide looks like a layout bug to users navigating months)
+  const hasKRs  = state.monthlyKRs.some(k => k.year === year && k.month === month);
+  const hasMITs = state.dailyMITs.some(m => m.date >= start && m.date <= end);
+  if (!hasKRs && !hasMITs) {
+    return (
+      <p style={{ color: 'var(--color-text-muted)', fontSize: 13, padding: '16px 0 8px' }}>
+        No KRs or MITs logged for this month. Navigate to a month with activity to see alignment.
+      </p>
+    );
+  }
+
+  const mitCounts = mitCountsByDimension(state, start, end);
+  const krCounts  = krCountsByDimension(state, year, month);
+
+  // Goal 7 (Uncategorized) always shows a neutral grey dot — not red — because
+  // the user cannot fix the absence of a dimension mapping; red implies a
+  // recoverable failure, which this is not.
+  const dotColor = { active: 'var(--color-success)', planned: 'var(--color-accent)', absent: 'var(--color-danger)', uncategorized: 'var(--color-text-muted)' } as const;
+
+  return (
+    <>
+      <table className="table-base">
+        <thead>
+          <tr>
+            <th>Deathbed Goal</th>
+            <th>Dimension</th>
+            <th>KRs</th>
+            <th>Completed MITs</th>
+            <th>Alignment</th>
+          </tr>
+        </thead>
+        <tbody>
+          {state.deathbedGoals.map((goal, i) => {
+            // Positional mapping: indices 0–5 → LIFE_DIMENSIONS, index 6 → Uncategorized
+            const dim   = i < 6 ? LIFE_DIMENSIONS[i] : null;
+            const dimId = dim?.id as DimensionId | undefined;
+
+            const krCount  = dimId ? (krCounts.get(dimId)  ?? 0) : 0;
+            const mitCount = dimId ? (mitCounts.get(dimId) ?? 0) : 0;
+
+            const status = !dimId ? 'absent'
+              : mitCount >= 1   ? 'active'
+              : krCount  >= 1   ? 'planned'
+                                : 'absent';
+
+            const goalText    = goal.trim();
+            const displayGoal = goalText
+              ? (goalText.length > 60 ? goalText.slice(0, 60) + '…' : goalText)
+              : '(not set)';
+
+            const uncategorizedTooltip = !dimId
+              ? 'Goals without a dimension mapping are not tracked in OKRs — this is expected.'
+              : undefined;
+
+            return (
+              <tr key={i}>
+                <td title={goalText || undefined}
+                  style={{ color: goalText ? 'var(--color-text-primary)' : 'var(--color-text-muted)', fontStyle: goalText ? 'normal' : 'italic' }}>
+                  {displayGoal}
+                </td>
+                <td style={{ color: 'var(--color-text-muted)', fontSize: 12 }}
+                  title={uncategorizedTooltip}>
+                  {dim?.label ?? 'Uncategorized'}
+                </td>
+                <td style={{ color: 'var(--color-text-muted)' }}>{krCount}</td>
+                <td style={{ color: 'var(--color-text-muted)' }}>{mitCount}</td>
+                <td title={uncategorizedTooltip ?? { active: 'Active', planned: 'Planned', absent: 'Absent' }[status]}>
+                  <span style={{
+                    color: !dimId ? dotColor.uncategorized : dotColor[status],
+                    fontSize: 16,
+                  }}>●</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn-ghost" style={{ fontSize: 12, padding: '2px 10px' }} onClick={navigateToSetup}>
+          Edit goals →
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ─── STORY-025 / STORY-043: Review Tab Assembly ───────────────────────────────
 
 interface ReviewTabProps extends TabProps {
   navigateToPlan: (target: PlanNavTarget) => void;
+  navigateToSetup: () => void;
 }
 
-export function ReviewTab({ state, updateState, navigateToPlan }: ReviewTabProps) {
+export function ReviewTab({ state, updateState, navigateToPlan, navigateToSetup }: ReviewTabProps) {
   void updateState; // Review tab is read-only
 
   // Week selector — shared by STORY-022 and STORY-023
@@ -423,17 +576,15 @@ export function ReviewTab({ state, updateState, navigateToPlan }: ReviewTabProps
       <div className="section-divider">Weekly Review</div>
 
       <div className="review-section">
-        {/* Week selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <button className="btn-ghost" style={{ padding: '4px 10px' }}
-            disabled={atEarliestWeek}
-            onClick={() => setWeekStart(w => addDays(w, -7))}>←</button>
-          <span style={{ flex: 1, textAlign: 'center', fontWeight: 600 }}>
-            Week of {formatWeekLabel(weekStart)}
-          </span>
-          <button className="btn-ghost" style={{ padding: '4px 10px' }}
-            disabled={atCurrentWeek}
-            onClick={() => setWeekStart(w => addDays(w, 7))}>→</button>
+        <div className="review-nav-bar">
+          <DateNavBar
+            label={`Week of ${formatWeekLabel(weekStart)}`}
+            onPrev={() => setWeekStart(w => addDays(w, -7))}
+            onNext={() => setWeekStart(w => addDays(w, 7))}
+            prevDisabled={atEarliestWeek}
+            nextDisabled={atCurrentWeek}
+            style={{ marginBottom: 0, flex: 1 }}
+          />
         </div>
 
         {/* STORY-022 */}
@@ -447,20 +598,18 @@ export function ReviewTab({ state, updateState, navigateToPlan }: ReviewTabProps
       </div>
 
       {/* ── Monthly OKR Progress ────────────────────────────────────── */}
-      <div className="section-divider" style={{ marginTop: 32 }}>Monthly OKR Progress</div>
+      <div className="section-divider">Monthly OKR Progress</div>
 
       <div className="review-section">
-        {/* Month selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <button className="btn-ghost" style={{ padding: '4px 10px' }}
-            disabled={atEarliestMonth}
-            onClick={prevMonth}>←</button>
-          <span style={{ flex: 1, textAlign: 'center', fontWeight: 600 }}>
-            {formatMonthLabel(selYear, selMonth)}
-          </span>
-          <button className="btn-ghost" style={{ padding: '4px 10px' }}
-            disabled={atCurrentMonth}
-            onClick={nextMonth}>→</button>
+        <div className="review-nav-bar">
+          <DateNavBar
+            label={formatMonthLabel(selYear, selMonth)}
+            onPrev={prevMonth}
+            onNext={nextMonth}
+            prevDisabled={atEarliestMonth}
+            nextDisabled={atCurrentMonth}
+            style={{ marginBottom: 0, flex: 1 }}
+          />
         </div>
 
         {/* STORY-024 */}
@@ -468,6 +617,18 @@ export function ReviewTab({ state, updateState, navigateToPlan }: ReviewTabProps
 
         {/* STORY-029 — monthly period */}
         <DimensionDistributionTable state={state} start={monthS} end={monthE} />
+      </div>
+
+      {/* ── Deathbed Alignment (STORY-042) ──────────────────────────── */}
+      <div className="section-divider">Deathbed Alignment</div>
+
+      <div className="review-section">
+        <DeathbedAlignmentSection
+          state={state}
+          year={selYear} month={selMonth}
+          start={monthS} end={monthE}
+          navigateToSetup={navigateToSetup}
+        />
       </div>
 
     </div>

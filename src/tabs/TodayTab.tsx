@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { TabProps, DailyMIT, DailyLog } from '../types';
 import { EmptyState } from '../components/EmptyState';
+import { calculateStreak } from '../utils/habitUtils';
+import { DateNavBar } from '../components/DateNavBar';
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -16,6 +18,14 @@ function formatDisplayDate(iso: string): string {
   return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
+}
+
+function formatCarryFrom(iso: string): string {
+  const today     = todayISO();
+  const yesterday = addDays(today, -1);
+  if (iso === today)     return 'today';
+  if (iso === yesterday) return 'yesterday';
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 function snapToMonday(iso: string): string {
@@ -56,14 +66,16 @@ function DailyLogSection({ activeDate, state, updateState }: { activeDate: strin
 
       <div className="form-field">
         <span className="form-label">Mood</span>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginRight: 2 }}>Low</span>
           {([1, 2, 3, 4, 5] as const).map(n => (
             <button key={n}
               className={mood === n ? 'btn-primary' : 'btn-ghost'}
-              style={{ width: 40, height: 36, padding: 0 }}
+              style={{ width: 36, height: 34, padding: 0 }}
               onClick={() => setMood(n)}
             >{n}</button>
           ))}
+          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginLeft: 2 }}>High</span>
         </div>
       </div>
 
@@ -120,10 +132,13 @@ function EndOfDayResolution({ activeDate, state, updateState }: { activeDate: st
     return (
       <div style={{
         marginTop: 16, padding: '10px 14px',
-        border: '1px solid var(--color-border)', borderRadius: 4,
+        border: '1px solid var(--color-success)',
+        borderRadius: 4,
+        background: 'color-mix(in srgb, var(--color-success) 8%, transparent)',
         color: 'var(--color-success)', fontSize: 13,
+        display: 'flex', alignItems: 'center', gap: 8,
       }}>
-        All resolved.
+        <span>✓</span> All resolved.
       </div>
     );
   }
@@ -144,7 +159,7 @@ function EndOfDayResolution({ activeDate, state, updateState }: { activeDate: st
     updateState({
       dailyMITs: [
         ...state.dailyMITs.map(m =>
-          m.id === mit.id ? { ...m, status: 'carried', carriedForwardTo: targetDay } : m
+          m.id === mit.id ? { ...m, status: 'carried' as const, carriedForwardTo: targetDay } : m
         ),
         carried,
       ],
@@ -152,7 +167,7 @@ function EndOfDayResolution({ activeDate, state, updateState }: { activeDate: st
   };
 
   const handleDrop = (id: string) =>
-    updateState({ dailyMITs: state.dailyMITs.map(m => m.id === id ? { ...m, status: 'dropped' } : m) });
+    updateState({ dailyMITs: state.dailyMITs.map(m => m.id === id ? { ...m, status: 'dropped' as const } : m) });
 
   return (
     <div style={{ marginTop: 16 }}>
@@ -184,10 +199,79 @@ function EndOfDayResolution({ activeDate, state, updateState }: { activeDate: st
   );
 }
 
+// ─── STORY-037: Habit Streak Summary ─────────────────────────────────────────
+// Rendered inside MITSection, below the MIT add form, above end-of-day resolution.
+// Always writes to todayISO() — never to MITSection's activeDate.
+
+function HabitStreakSummary({ state, updateState, navigateToHabits }: { navigateToHabits?: () => void } & TabProps) {
+  const activeHabits = (state.habits ?? []).filter(h => h.archivedAt === null);
+  if (activeHabits.length === 0) return null;
+
+  const today = todayISO(); // always real today — not the viewed date
+
+  const isCompleted = (habitId: string) =>
+    (state.habitLogs ?? []).some(l => l.habitId === habitId && l.date === today && l.completed);
+
+  const handleToggle = (habitId: string, checked: boolean) => {
+    const existing = (state.habitLogs ?? []).find(l => l.habitId === habitId && l.date === today);
+    if (existing) {
+      updateState({ habitLogs: (state.habitLogs ?? []).map(l => l.id === existing.id ? { ...l, completed: checked } : l) });
+    } else {
+      updateState({ habitLogs: [...(state.habitLogs ?? []), { id: newId(), habitId, date: today, completed: checked }] });
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <p style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Habit Streaks
+          <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, marginLeft: 6, fontSize: 11 }}>
+            (always logs to today)
+          </span>
+        </p>
+        {navigateToHabits && (
+          <button className="btn-ghost" style={{ fontSize: 11, padding: '1px 8px' }} onClick={navigateToHabits}>
+            Manage habits →
+          </button>
+        )}
+      </div>
+      {activeHabits.map(h => {
+        const streak = calculateStreak(h.id, state.habitLogs, today);
+        const done   = isCompleted(h.id);
+        return (
+          <div key={h.id} style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '5px 0', borderBottom: '1px solid var(--color-border)',
+          }}>
+            <span style={{ flex: 1, fontSize: 13 }}>{h.name}</span>
+            {streak > 0 && (
+              <span style={{ fontSize: 11, color: 'var(--color-accent)', background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)', padding: '1px 7px', borderRadius: 10, whiteSpace: 'nowrap' }}>
+                {streak} days
+              </span>
+            )}
+            <button
+              style={{
+                width: 22, height: 22, borderRadius: '50%', cursor: 'pointer',
+                border: `2px solid ${done ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                background: done ? 'var(--color-accent)' : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              }}
+              onClick={() => handleToggle(h.id, !done)}
+            >
+              {done && <span style={{ color: '#0f1117', fontSize: 11, lineHeight: 1 }}>✓</span>}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── STORY-014: MIT Section ───────────────────────────────────────────────────
 // Rendered with key={activeDate} so local form state resets on date navigation.
 
-function MITSection({ activeDate, state, updateState }: { activeDate: string } & TabProps) {
+function MITSection({ activeDate, state, updateState, navigateToHabits, navigateToPlan }: { activeDate: string; navigateToHabits?: () => void; navigateToPlan?: () => void } & TabProps) {
   const today = todayISO();
   const [newText, setNewText]           = useState('');
   const [newInitiativeId, setNewInitId] = useState<string>('');
@@ -253,7 +337,7 @@ function MITSection({ activeDate, state, updateState }: { activeDate: string } &
             {mit.text}
             {mit.carriedOverFrom && (
               <span style={{ color: 'var(--color-text-muted)', fontSize: 11, marginLeft: 8 }}>
-                from {mit.carriedOverFrom}
+                from {formatCarryFrom(mit.carriedOverFrom)}
               </span>
             )}
           </span>
@@ -271,17 +355,21 @@ function MITSection({ activeDate, state, updateState }: { activeDate: string } &
             value={newText} maxLength={150} style={{ flex: '1 1 180px' }}
             onChange={e => setNewText(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }} />
-          <select className="input-base" value={newInitiativeId}
-            style={{ flex: '0 0 190px' }}
-            disabled={weekInitiatives.length === 0}
-            onChange={e => setNewInitId(e.target.value)}>
-            <option value="">
-              {weekInitiatives.length === 0 ? 'Add initiatives in Plan first' : 'Link initiative (optional)'}
-            </option>
-            {weekInitiatives.map(i => (
-              <option key={i.id} value={i.id}>{i.text.slice(0, 45)}</option>
-            ))}
-          </select>
+          {weekInitiatives.length === 0 ? (
+            <button className="btn-ghost" style={{ flex: '0 0 190px', fontSize: 12 }}
+              onClick={navigateToPlan}>
+              Add initiatives in Plan →
+            </button>
+          ) : (
+            <select className="input-base" value={newInitiativeId}
+              style={{ flex: '0 0 190px' }}
+              onChange={e => setNewInitId(e.target.value)}>
+              <option value="">Link initiative (optional)</option>
+              {weekInitiatives.map(i => (
+                <option key={i.id} value={i.id}>{i.text.slice(0, 45)}</option>
+              ))}
+            </select>
+          )}
           <button className="btn-primary" onClick={handleAdd} disabled={!newText.trim()}>Add MIT</button>
         </div>
       ) : (
@@ -290,6 +378,7 @@ function MITSection({ activeDate, state, updateState }: { activeDate: string } &
         </p>
       )}
 
+      <HabitStreakSummary state={state} updateState={updateState} navigateToHabits={navigateToHabits} />
       <EndOfDayResolution activeDate={activeDate} state={state} updateState={updateState} />
     </div>
   );
@@ -297,7 +386,12 @@ function MITSection({ activeDate, state, updateState }: { activeDate: string } &
 
 // ─── STORY-017: Today Tab assembly + date navigation ─────────────────────────
 
-export function TodayTab({ state, updateState }: TabProps) {
+interface TodayTabProps extends TabProps {
+  navigateToHabits: () => void;
+  navigateToPlan?: () => void;
+}
+
+export function TodayTab({ state, updateState, navigateToHabits, navigateToPlan }: TodayTabProps) {
   const today  = todayISO();
   const minDay = addDays(today, -30);
   const [activeDate, setActiveDate] = useState(today);
@@ -309,35 +403,19 @@ export function TodayTab({ state, updateState }: TabProps) {
 
   return (
     <div>
-      {/* Date navigation header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        marginBottom: 24, paddingBottom: 16,
-        borderBottom: '1px solid var(--color-border)',
-      }}>
-        <button className="btn-ghost" style={{ padding: '4px 12px', flexShrink: 0 }}
-          disabled={isAtMin} onClick={() => nav(-1)}>←</button>
-
-        <div style={{ flex: 1, textAlign: 'center' }}>
-          <span style={{ fontWeight: 600 }}>{formatDisplayDate(activeDate)}</span>
-          {!isToday && (
-            <span style={{ color: 'var(--color-text-muted)', fontSize: 12, marginLeft: 8 }}>
-              (Past)
-            </span>
-          )}
-        </div>
-
-        <button className="btn-ghost" style={{ padding: '4px 12px', flexShrink: 0 }}
-          disabled={isToday} onClick={() => nav(+1)}>→</button>
-
-        {!isToday && (
-          <button className="btn-ghost" style={{ fontSize: 12, flexShrink: 0 }}
-            onClick={() => setActiveDate(today)}>Today</button>
-        )}
-      </div>
+      <DateNavBar
+        label={formatDisplayDate(activeDate)}
+        sublabel={isToday ? undefined : '(Past)'}
+        onPrev={() => nav(-1)}
+        onNext={() => nav(+1)}
+        prevDisabled={isAtMin}
+        nextDisabled={isToday}
+        onToday={isToday ? undefined : () => setActiveDate(today)}
+        style={{ marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid var(--color-border)' }}
+      />
 
       {/* MIT section — key resets local form state on date switch */}
-      <MITSection key={activeDate} activeDate={activeDate} state={state} updateState={updateState} />
+      <MITSection key={activeDate} activeDate={activeDate} state={state} updateState={updateState} navigateToHabits={navigateToHabits} navigateToPlan={navigateToPlan} />
 
       {/* Daily log — key resets local form state on date switch */}
       <DailyLogSection key={`log-${activeDate}`} activeDate={activeDate} state={state} updateState={updateState} />

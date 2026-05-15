@@ -263,21 +263,38 @@ export function DimensionsTable({ state }: Pick<TabProps, 'state'>) {
 
 // ─── STORY-008: Setup Tab Assembly ───────────────────────────────────────────
 
+const BANNER_DISMISSED_KEY = 'life-compass-welcome-dismissed';
+
 export function SetupTab({ state, updateState }: TabProps) {
-  // Welcome banner: visible until profile is complete AND at least one goal is set.
-  // Computed from state on every render — no persisted dismissal flag.
+  const [bannerDismissed, setBannerDismissed] = useState(
+    () => localStorage.getItem(BANNER_DISMISSED_KEY) === 'true'
+  );
+
   const profileComplete = state.profile !== null && state.profile.name.trim() !== '';
   const hasAnyGoal      = state.deathbedGoals.some(g => g.trim() !== '');
-  const showBanner      = !profileComplete || !hasAnyGoal;
+  // Banner hides when dismissed OR when setup is complete
+  const showBanner      = !bannerDismissed && (!profileComplete || !hasAnyGoal);
+
+  const dismissBanner = () => {
+    localStorage.setItem(BANNER_DISMISSED_KEY, 'true');
+    setBannerDismissed(true);
+  };
 
   return (
     <div className="setup-tab">
       {showBanner && (
-        <div className="welcome-banner">
-          <strong>Welcome to Life Compass.</strong>{' '}
-          {profileComplete
-            ? 'Now add at least one deathbed goal — it anchors everything you plan.'
-            : 'Start by filling in your profile and at least one deathbed goal — these anchor everything you plan.'}
+        <div className="welcome-banner" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <span>
+            <strong>Welcome to Life Compass.</strong>{' '}
+            {profileComplete
+              ? 'Now add at least one deathbed goal — it anchors everything you plan.'
+              : 'Start by filling in your profile and at least one deathbed goal — these anchor everything you plan.'}
+          </span>
+          <button
+            onClick={dismissBanner}
+            style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}
+            title="Dismiss"
+          >✕</button>
         </div>
       )}
 

@@ -36,18 +36,22 @@ export async function callCoach(userMessage: string, state: AppState): Promise<C
     console.error('[life-compass] {{CONTEXT}} substitution failed in system prompt');
   }
 
-  // Debug log with key redacted — gated to development builds only
-  if (import.meta.env.DEV) {
-    console.debug('[life-compass] callCoach request', {
-      model: MODEL,
-      userMessage,
-      contextLength: context.length,
-      apiKey: `${apiKey.slice(0, 8)}…redacted`,
-    });
-  }
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  const requestBody = {
+    model:      MODEL,
+    max_tokens: MAX_TOKENS,
+    system,
+    messages:   [{ role: 'user', content: userMessage }],
+  };
+
+  console.log('[life-compass] API request:', JSON.stringify({
+    model:      requestBody.model,
+    max_tokens: requestBody.max_tokens,
+    system:     requestBody.system?.substring(0, 200),
+    messages:   requestBody.messages,
+  }, null, 2));
 
   try {
     const response = await fetch(API_URL, {
@@ -59,12 +63,7 @@ export async function callCoach(userMessage: string, state: AppState): Promise<C
         'content-type':                           'application/json',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-      body: JSON.stringify({
-        model:      MODEL,
-        max_tokens: MAX_TOKENS,
-        system,
-        messages:   [{ role: 'user', content: userMessage }],
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (response.ok) {
@@ -73,7 +72,10 @@ export async function callCoach(userMessage: string, state: AppState): Promise<C
       return { text, error: false };
     }
 
-    // HTTP error paths — never expose raw response body to the UI
+    // Log raw error body for debugging — never shown in the UI
+    const errorBody = await response.text().catch(() => '(could not read body)');
+    console.log(`[life-compass] API error ${response.status}:`, errorBody);
+
     if (response.status === 401) return { text: 'Invalid API key — update it in Setup.', error: true };
     if (response.status === 429) return { text: 'Rate limit hit — try again in a moment.', error: true };
     if (response.status === 400) return { text: 'Your request could not be processed — your context may be too large.', error: true };

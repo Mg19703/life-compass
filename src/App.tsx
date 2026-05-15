@@ -7,6 +7,7 @@ import { TodayTab } from './tabs/TodayTab';
 import { PlanTab } from './tabs/PlanTab';
 import { ReviewTab } from './tabs/ReviewTab';
 import { CoachTab } from './tabs/CoachTab';
+import { HabitsTab } from './tabs/HabitsTab';
 import './App.css';
 
 const TABS: { id: TabId; label: string }[] = [
@@ -15,6 +16,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'plan',   label: 'Plan'   },
   { id: 'coach',  label: 'Coach'  },
   { id: 'review', label: 'Review' },
+  { id: 'habits', label: 'Habits' },
 ];
 
 export default function App() {
@@ -23,14 +25,15 @@ export default function App() {
   const defaultTab: TabId = state.profile === null ? 'setup' : 'today';
   const [activeTab, setActiveTab] = useState<TabId>(defaultTab);
 
-  // Deep-link payload: set by ReviewTab to navigate Plan to a specific KR.
-  // PlanTab reads it on mount, applies filter + expansion, then clears it.
   const [planNavTarget, setPlanNavTarget] = useState<PlanNavTarget | null>(null);
 
   const navigateToPlan = (target: PlanNavTarget) => {
     setPlanNavTarget(target);
     setActiveTab('plan');
   };
+
+  const navigateToHabits = () => setActiveTab('habits');
+  const navigateToSetup  = () => setActiveTab('setup');
 
   const tabProps = { state, updateState, getLatestState };
 
@@ -52,18 +55,19 @@ export default function App() {
 
       <main className="tab-content">
         {activeTab === 'setup'  && <ErrorBoundary tabLevel><SetupTab  {...tabProps} /></ErrorBoundary>}
-        {activeTab === 'today'  && <ErrorBoundary tabLevel><TodayTab  {...tabProps} /></ErrorBoundary>}
+        {activeTab === 'today'  && <ErrorBoundary tabLevel><TodayTab  {...tabProps} navigateToHabits={navigateToHabits} navigateToPlan={() => setActiveTab('plan')} /></ErrorBoundary>}
         {activeTab === 'plan'   && (
           <ErrorBoundary tabLevel>
             <PlanTab {...tabProps} navTarget={planNavTarget} onNavConsumed={() => setPlanNavTarget(null)} />
           </ErrorBoundary>
         )}
-        {activeTab === 'coach'  && <ErrorBoundary tabLevel><CoachTab  {...tabProps} /></ErrorBoundary>}
+        {activeTab === 'coach'  && <ErrorBoundary tabLevel><CoachTab  {...tabProps} navigateToSetup={navigateToSetup} /></ErrorBoundary>}
         {activeTab === 'review' && (
           <ErrorBoundary tabLevel>
-            <ReviewTab {...tabProps} navigateToPlan={navigateToPlan} />
+            <ReviewTab {...tabProps} navigateToPlan={navigateToPlan} navigateToSetup={navigateToSetup} />
           </ErrorBoundary>
         )}
+        {activeTab === 'habits' && <ErrorBoundary tabLevel><HabitsTab {...tabProps} /></ErrorBoundary>}
       </main>
     </div>
   );
