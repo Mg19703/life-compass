@@ -143,7 +143,7 @@ function HabitCRUDSection({ state, updateState }: TabProps) {
   return (
     <div>
       {/* Add form */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 16 }}>
+      <div className="btn-row" style={{ marginBottom: 16 }}>
         <div style={{ flex: '1 1 180px' }}>
           <input className="input-base" placeholder="Habit name" value={newName} maxLength={80}
             onChange={e => { setNewName(e.target.value); setNameError(''); }}

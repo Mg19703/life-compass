@@ -5,27 +5,24 @@ import type {
 } from '../types';
 import { LIFE_DIMENSIONS } from '../defaults';
 import { EmptyState } from '../components/EmptyState';
+import { snapToMonday, todayISO } from '../utils/dateUtils';
+import {
+  execDeleteAnnual,
+  execDeleteQuarterly,
+  execDeleteMonthly,
+  execDeleteInitiative,
+} from '../utils/okrMutations';
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 const newId = () => crypto.randomUUID();
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
 function currentYear() { return new Date().getFullYear(); }
-
-function snapToMonday(iso: string): string {
-  if (!iso) return iso;
-  const d = new Date(iso + 'T00:00:00');
-  const day = d.getDay(); // 0 = Sunday
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0, 10);
-}
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const QUARTERS = ['Q1','Q2','Q3','Q4'] as const;
 
-// ─── Cascade count + exec helpers ────────────────────────────────────────────
+// ─── Cascade count helper (UI-only, not shared with applyOKRTool) ────────────
 
 function childCounts(state: AppState, level: 'annual' | 'quarterly' | 'monthly', id: string) {
   if (level === 'annual') {
@@ -48,45 +45,6 @@ function cascadeBody(c: { qos: number; krs: number; inits: number }): string {
   return p.length ? `Also deletes: ${p.join(', ')}.` : 'No child items will be removed.';
 }
 
-function execDeleteAnnual(state: AppState, id: string): Partial<AppState> {
-  const qoIds = state.quarterlyObjectives.filter(q => q.annualOKRId === id).map(q => q.id);
-  const krIds = state.monthlyKRs.filter(k => qoIds.includes(k.quarterlyObjectiveId)).map(k => k.id);
-  const initIds = new Set(state.weeklyInitiatives.filter(i => krIds.includes(i.monthlyKRId)).map(i => i.id));
-  return {
-    annualOKRs: state.annualOKRs.filter(o => o.id !== id),
-    quarterlyObjectives: state.quarterlyObjectives.filter(q => !qoIds.includes(q.id)),
-    monthlyKRs: state.monthlyKRs.filter(k => !krIds.includes(k.id)),
-    weeklyInitiatives: state.weeklyInitiatives.filter(i => !initIds.has(i.id)),
-    dailyMITs: state.dailyMITs.map(m => initIds.has(m.initiativeId ?? '') ? { ...m, initiativeId: null } : m),
-  };
-}
-
-function execDeleteQuarterly(state: AppState, id: string): Partial<AppState> {
-  const krIds = state.monthlyKRs.filter(k => k.quarterlyObjectiveId === id).map(k => k.id);
-  const initIds = new Set(state.weeklyInitiatives.filter(i => krIds.includes(i.monthlyKRId)).map(i => i.id));
-  return {
-    quarterlyObjectives: state.quarterlyObjectives.filter(q => q.id !== id),
-    monthlyKRs: state.monthlyKRs.filter(k => !krIds.includes(k.id)),
-    weeklyInitiatives: state.weeklyInitiatives.filter(i => !initIds.has(i.id)),
-    dailyMITs: state.dailyMITs.map(m => initIds.has(m.initiativeId ?? '') ? { ...m, initiativeId: null } : m),
-  };
-}
-
-function execDeleteMonthly(state: AppState, id: string): Partial<AppState> {
-  const initIds = new Set(state.weeklyInitiatives.filter(i => i.monthlyKRId === id).map(i => i.id));
-  return {
-    monthlyKRs: state.monthlyKRs.filter(k => k.id !== id),
-    weeklyInitiatives: state.weeklyInitiatives.filter(i => !initIds.has(i.id)),
-    dailyMITs: state.dailyMITs.map(m => initIds.has(m.initiativeId ?? '') ? { ...m, initiativeId: null } : m),
-  };
-}
-
-function execDeleteInitiative(state: AppState, id: string): Partial<AppState> {
-  return {
-    weeklyInitiatives: state.weeklyInitiatives.filter(i => i.id !== id),
-    dailyMITs: state.dailyMITs.map(m => m.initiativeId === id ? { ...m, initiativeId: null } : m),
-  };
-}
 
 // ─── Shared micro-components ──────────────────────────────────────────────────
 
@@ -196,7 +154,7 @@ function WeeklyInitiativesSection({ krId, state, updateState }: { krId: string }
             )
           }
 
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <div className="btn-row">
             <input className="input-base" placeholder="Initiative text" value={newText} style={{ flex: '1 1 180px' }}
               onChange={e => { setNewText(e.target.value); setAddError(''); }}
               onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
@@ -498,7 +456,7 @@ function AnnualOKRsSection({ dimensionId, targetQOId, state, updateState }: { di
       ))}
 
       {/* Add form */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-start', marginTop: 8 }}>
+      <div style={{ marginTop: 8 }}><div className="btn-row">
         <input className="input-base" placeholder="Annual objective" value={newObj} style={{ flex: '1 1 200px' }}
           onChange={e => setNewObj(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
@@ -507,7 +465,7 @@ function AnnualOKRsSection({ dimensionId, targetQOId, state, updateState }: { di
           onChange={e => setNewYear(Number(e.target.value))}
         />
         <button className="btn-primary" onClick={handleAdd}>Add OKR</button>
-      </div>
+      </div></div>
 
       {deleteTarget && (() => {
         const counts = childCounts(state, 'annual', deleteTarget);

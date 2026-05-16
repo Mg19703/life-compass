@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { TabProps } from '../types';
+import type { TabProps, DimensionId } from '../types';
 import { LIFE_DIMENSIONS } from '../defaults';
 
 // ─── STORY-004: Profile Form ─────────────────────────────────────────────────
@@ -261,6 +261,60 @@ export function DimensionsTable({ state }: Pick<TabProps, 'state'>) {
   );
 }
 
+// ─── STORY-062: Deathbed goal → dimension mapping picker ─────────────────────
+
+export function DeathbedMappingSection({ state, updateState }: TabProps) {
+  const goals    = state.deathbedGoals;
+  const mappings = state.deathbedGoalMappings ?? Array(7).fill(null);
+
+  const nonEmptyCount = goals.filter(g => g.trim() !== '').length;
+  if (nonEmptyCount === 0) return null;
+
+  const handleChange = (i: number, value: DimensionId | null) => {
+    const cur = state.deathbedGoalMappings ?? Array(7).fill(null);
+    updateState({
+      deathbedGoalMappings: cur.map((v, j) => j === i ? value : v) as (DimensionId | null)[],
+    });
+  };
+
+  return (
+    <div className="section-content">
+      <p style={{ color: 'var(--color-text-muted)', fontSize: 13, marginBottom: 14 }}>
+        Map each goal to a life dimension so the Review tab can track alignment.
+      </p>
+      {goals.map((goal, i) => {
+        if (!goal.trim()) return null;
+        const truncated = goal.length > 80 ? goal.slice(0, 80) + '…' : goal;
+        const current   = mappings[i] ?? null;
+        return (
+          <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+            <span
+              title={goal}
+              style={{ flex: 1, color: 'var(--color-text-muted)', fontSize: 13, overflow: 'hidden' }}
+            >
+              {truncated}
+            </span>
+            <select
+              className="input-base"
+              style={{ flex: '0 0 180px' }}
+              value={current ?? ''}
+              onChange={e => {
+                const val = e.target.value;
+                handleChange(i, val === '' ? null : val as DimensionId);
+              }}
+            >
+              <option value="">No dimension</option>
+              {LIFE_DIMENSIONS.map(d => (
+                <option key={d.id} value={d.id}>{d.label}</option>
+              ))}
+            </select>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── STORY-008: Setup Tab Assembly ───────────────────────────────────────────
 
 const BANNER_DISMISSED_KEY = 'life-compass-welcome-dismissed';
@@ -287,8 +341,8 @@ export function SetupTab({ state, updateState }: TabProps) {
           <span>
             <strong>Welcome to Life Compass.</strong>{' '}
             {profileComplete
-              ? 'Now add at least one deathbed goal — it anchors everything you plan.'
-              : 'Start by filling in your profile and at least one deathbed goal — these anchor everything you plan.'}
+              ? 'Now add at least one deathbed goal — it anchors everything you plan. Then map each goal to a life dimension in the Dimension Mapping section below.'
+              : 'Start by filling in your profile and at least one deathbed goal — these anchor everything you plan. Then map each goal to a life dimension in the Dimension Mapping section below.'}
           </span>
           <button
             onClick={dismissBanner}
@@ -303,6 +357,9 @@ export function SetupTab({ state, updateState }: TabProps) {
 
       <div className="section-divider">Deathbed Goals</div>
       <DeathbedGoalsEditor state={state} updateState={updateState} />
+
+      <div className="section-divider">Dimension Mapping</div>
+      <DeathbedMappingSection state={state} updateState={updateState} />
 
       <div className="section-divider">Coach API Key</div>
       <ApiKeyConfig state={state} updateState={updateState} />

@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import type { TabProps } from '../types';
+import type { AppState, TabProps } from '../types';
 import { buildCoachContext, COACH_SETUP_INCOMPLETE } from '../coach/coachContext';
-import { callCoach } from '../coach/callCoach';
+import { callCoach, callCoachWithTools, sendToolResult } from '../coach/callCoach';
+import type { AnthropicMessageParam, CallCoachWithToolsResult } from '../coach/types';
 import { ProposalCard } from '../components/ProposalCard';
 import type { ProposalCardSection } from '../components/ProposalCard';
+import { ToolProposalCard } from '../components/ToolProposalCard';
+import { OKR_TOOLS, MIT_TOOLS, DESTRUCTIVE_TOOL_NAMES } from '../coach/tools';
+import { applyOKRTool } from '../coach/applyOKRTool';
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
@@ -20,6 +24,9 @@ function DisclosureModal({ onAccept }: { onAccept: () => void }) {
         </p>
         <p style={{ fontSize: 13, color: 'var(--color-text-muted)', lineHeight: 1.7, marginBottom: 12 }}>
           When you send a message, the Coach assembles your profile, goals, OKRs, recent MITs, and mood logs and sends them to <strong style={{ color: 'var(--color-text-primary)' }}>Anthropic's API</strong> to generate a response. This data leaves your device.
+        </p>
+        <p style={{ fontSize: 13, color: 'var(--color-text-muted)', lineHeight: 1.7, marginBottom: 12 }}>
+          When you use Coach actions (e.g., creating or editing OKRs), conversation history including your OKR and task data may be sent as part of structured action requests.
         </p>
         <p style={{ fontSize: 13, color: 'var(--color-text-muted)', lineHeight: 1.7, marginBottom: 20 }}>
           Anthropic does not use API inputs to train their models by default. Your Life Compass data is never stored by this app on any server.
@@ -43,11 +50,32 @@ interface ProposalData {
   sections: { label: string; content: string }[];
 }
 
+interface ToolCardData {
+  toolName: string;
+  toolInput: unknown;
+  isDestructive: boolean;
+  toolUseId: string;
+}
+
 interface Message {
+  id: string; // UUID — used for in-place replacement on Confirm/Cancel
   role: 'user' | 'assistant';
   text: string;
   error?: boolean;
-  proposal?: ProposalData; // when set, renders ProposalCard instead of plain text
+  proposal?: ProposalData;
+  toolCard?: ToolCardData;
+}
+
+/** Creates a Message with a stable UUID assigned at creation time. */
+function mkMsg(partial: Omit<Message, 'id'>): Message {
+  return { id: crypto.randomUUID(), ...partial };
+}
+
+// ─── Pending tool state ───────────────────────────────────────────────────────
+
+interface PendingTool {
+  toolUseId: string;
+  conversationHistory: AnthropicMessageParam[];
 }
 
 // ─── Structured action prompts ────────────────────────────────────────────────
@@ -90,25 +118,29 @@ function parseWeeklyReview(text: string): { label: string; content: string }[] |
   return sections.length >= 4 ? sections : null;
 }
 
-// ─── STORY-021 + 039 + 040: Coach Tab ────────────────────────────────────────
+// ─── STORY-021 + 039 + 040 + 056 + 058: Coach Tab ────────────────────────────
 
 interface CoachTabProps extends TabProps {
   navigateToSetup?: () => void;
+  getLatestState: () => AppState;
 }
 
-export function CoachTab({ state, updateState, navigateToSetup }: CoachTabProps) {
+export function CoachTab({ state, updateState, getLatestState, navigateToSetup }: CoachTabProps) {
   const [disclosed, setDisclosed] = useState(
     () => localStorage.getItem(DISCLOSURE_KEY) === 'true'
   );
   const handleAccept = () => { localStorage.setItem(DISCLOSURE_KEY, 'true'); setDisclosed(true); };
 
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput]       = useState('');
-  // Discriminated loading state — tracks which action is in flight so only
-  // the triggered button shows "Thinking…". null = idle.
-  const [loading, setLoading]   = useState<'chat' | 'mits' | 'review' | null>(null);
-  const bottomRef               = useRef<HTMLDivElement>(null);
-  const inputRef                = useRef<HTMLTextAreaElement>(null);
+  const [messages, setMessages]     = useState<Message[]>([]);
+  const [input, setInput]           = useState('');
+  const [loading, setLoading]       = useState<'chat' | 'mits' | 'review' | null>(null);
+  const [pendingTool, setPendingTool] = useState<PendingTool | null>(null);
+  const bottomRef                   = useRef<HTMLDivElement>(null);
+  const inputRef                    = useRef<HTMLTextAreaElement>(null);
+  // callCount threaded via ref to avoid re-renders; reset per user message send
+  const callCountRef                = useRef(0);
+
+  const hasPendingToolCard = pendingTool !== null;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -117,19 +149,43 @@ export function CoachTab({ state, updateState, navigateToSetup }: CoachTabProps)
   const hasApiKey = Boolean(state.apiKey);
   const context   = buildCoachContext(state);
   const setupDone = context !== COACH_SETUP_INCOMPLETE;
-  const canAct    = hasApiKey && setupDone && loading === null;
+  // hasPendingToolCard blocks all actions until user decides
+  const canAct    = hasApiKey && setupDone && loading === null && !hasPendingToolCard;
   const canSend   = canAct && input.trim().length > 0;
 
-  // ── Chat send ─────────────────────────────────────────────────────────────
+  // ── callCoachWithTools result handler ────────────────────────────────────
+
+  const handleToolsResult = (result: CallCoachWithToolsResult) => {
+    if (result.type === 'message') {
+      setMessages(prev => [...prev, mkMsg({ role: 'assistant', text: result.text, error: result.error })]);
+    } else {
+      // tool_use — render ToolProposalCard; store pending state
+      const isDestructive = DESTRUCTIVE_TOOL_NAMES.has(result.toolName);
+      setMessages(prev => [...prev, mkMsg({
+        role: 'assistant', text: '',
+        toolCard: {
+          toolName:    result.toolName,
+          toolInput:   result.toolInput,
+          isDestructive,
+          toolUseId:   result.toolUseId,
+        },
+      })]);
+      setPendingTool({ toolUseId: result.toolUseId, conversationHistory: result.conversationHistory });
+    }
+  };
+
+  // ── Chat send (STORY-056: uses callCoachWithTools) ────────────────────────
 
   const handleSend = async () => {
     if (!canSend) return;
     const text = input.trim();
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', text }]);
+    setMessages(prev => [...prev, mkMsg({ role: 'user', text })]);
     setLoading('chat');
-    const response = await callCoach(text, state);
-    setMessages(prev => [...prev, { role: 'assistant', text: response.text, error: response.error }]);
+    callCountRef.current = 0;
+    const result = await callCoachWithTools(text, state, [...OKR_TOOLS, ...MIT_TOOLS], callCountRef.current);
+    callCountRef.current++;
+    handleToolsResult(result);
     setLoading(null);
     inputRef.current?.focus();
   };
@@ -153,16 +209,14 @@ export function CoachTab({ state, updateState, navigateToSetup }: CoachTabProps)
           type: 'suggest-mits',
           sections: mits.map((content, i) => ({ label: `${i + 1}.`, content })),
         };
-        // Replace prior suggest-mits card; append new one
         setMessages(prev => [
           ...prev.filter(m => m.proposal?.type !== 'suggest-mits'),
-          { role: 'assistant', text: '', proposal },
+          mkMsg({ role: 'assistant', text: '', proposal }),
         ]);
         return;
       }
     }
-    // Fallback to plain bubble
-    setMessages(prev => [...prev, { role: 'assistant', text: response.text, error: response.error }]);
+    setMessages(prev => [...prev, mkMsg({ role: 'assistant', text: response.text, error: response.error })]);
   };
 
   // ── STORY-040: Weekly Review ──────────────────────────────────────────────
@@ -179,53 +233,190 @@ export function CoachTab({ state, updateState, navigateToSetup }: CoachTabProps)
         const proposal: ProposalData = { type: 'weekly-review', sections: parsed };
         setMessages(prev => [
           ...prev.filter(m => m.proposal?.type !== 'weekly-review'),
-          { role: 'assistant', text: '', proposal },
+          mkMsg({ role: 'assistant', text: '', proposal }),
         ]);
         return;
       }
-      // Fallback: render raw text + a note
       setMessages(prev => [
         ...prev,
-        { role: 'assistant', text: response.text },
-        { role: 'assistant', text: 'Could not format as structured review.', error: false },
+        mkMsg({ role: 'assistant', text: response.text }),
+        mkMsg({ role: 'assistant', text: 'Could not format as structured review.', error: false }),
       ]);
       return;
     }
-    setMessages(prev => [...prev, { role: 'assistant', text: response.text, error: response.error }]);
+    setMessages(prev => [...prev, mkMsg({ role: 'assistant', text: response.text, error: response.error })]);
+  };
+
+  // ── STORY-056 + 058 + 059: Tool confirm/cancel handlers ──────────────────
+
+  const handleToolConfirm = async (msgId: string, toolCard: ToolCardData) => {
+    const { toolName, toolInput } = toolCard;
+    const inp = (typeof toolInput === 'object' && toolInput !== null ? toolInput : {}) as Record<string, unknown>;
+    const tools = [...OKR_TOOLS, ...MIT_TOOLS];
+
+    // ── STORY-058: MIT tool handling ────────────────────────────────────────
+
+    const isMITTool = toolName === 'edit_mit' || toolName === 'delete_mit';
+    if (isMITTool) {
+      const mitId = typeof inp.mitId === 'string' ? inp.mitId : '';
+      const mit   = state.dailyMITs.find(m => m.id === mitId);
+
+      if (!mit) {
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? mkMsg({ role: 'assistant', text: 'Task not found — it may have been deleted.' }) : m
+        ));
+        setPendingTool(null);
+        return;
+      }
+
+      if (mit.date !== todayISO()) {
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? mkMsg({ role: 'assistant', text: 'The Coach can only modify today\'s MITs.', error: true }) : m
+        ));
+        setPendingTool(null);
+        return;
+      }
+
+      // Build nextState before updating so sendToolResult gets fresh context.
+      const nextMITs = toolName === 'edit_mit'
+        ? state.dailyMITs.map(m => m.id !== mitId ? m : {
+            ...m,
+            ...(typeof inp.text === 'string' ? { text: inp.text } : {}),
+            ...('initiativeId' in inp ? { initiativeId: inp.initiativeId as string | null } : {}),
+          })
+        : state.dailyMITs.filter(m => m.id !== mitId);
+
+      const nextState = { ...state, dailyMITs: nextMITs };
+      updateState({ dailyMITs: nextMITs });
+
+      const summaryText = toolName === 'edit_mit' ? 'Task updated.' : 'Task deleted.';
+
+      // Continue conversation — card stays in 'applying' state until await resolves.
+      if (pendingTool) {
+        const { conversationHistory, toolUseId } = pendingTool;
+        setLoading('chat');
+        callCountRef.current++;
+        const result = await sendToolResult(
+          conversationHistory, toolUseId, { success: true },
+          nextState, tools, callCountRef.current,
+        );
+        setPendingTool(null);
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? mkMsg({ role: 'assistant', text: summaryText }) : m
+        ));
+        if (result.type === 'message' && result.error) {
+          setMessages(prev => [...prev, mkMsg({ role: 'assistant', text: result.text, error: true })]);
+        } else {
+          handleToolsResult(result);
+        }
+        setLoading(null);
+      } else {
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? mkMsg({ role: 'assistant', text: summaryText }) : m
+        ));
+        setPendingTool(null);
+      }
+      return;
+    }
+
+    // ── OKR tool handling ───────────────────────────────────────────────────
+
+    const isOKRTool = OKR_TOOLS.some(t => t.name === toolName);
+    if (!isOKRTool) return;
+
+    // Apply mutation; pass next (not stale state) to sendToolResult so the
+    // model's follow-up sees the updated OKR data in its context.
+    const next = applyOKRTool(state, toolName, toolInput);
+    updateState({
+      annualOKRs:          next.annualOKRs,
+      quarterlyObjectives: next.quarterlyObjectives,
+      monthlyKRs:          next.monthlyKRs,
+      weeklyInitiatives:   next.weeklyInitiatives,
+      dailyMITs:           next.dailyMITs,
+    });
+
+    const summaryText = `Applied: ${toolName.replace(/_/g, ' ')}.`;
+
+    if (pendingTool) {
+      const { conversationHistory, toolUseId } = pendingTool;
+      setLoading('chat');
+      callCountRef.current++;
+      const result = await sendToolResult(
+        conversationHistory, toolUseId, { success: true },
+        next, tools, callCountRef.current,
+      );
+      setPendingTool(null);
+      setMessages(prev => prev.map(m =>
+        m.id === msgId ? mkMsg({ role: 'assistant', text: summaryText }) : m
+      ));
+      if (result.type === 'message' && result.error) {
+        // AC #5: apply succeeded, but follow-up call failed — show error bubble.
+        setMessages(prev => [...prev, mkMsg({ role: 'assistant', text: result.text, error: true })]);
+      } else {
+        handleToolsResult(result);
+      }
+      setLoading(null);
+    } else {
+      setMessages(prev => prev.map(m =>
+        m.id === msgId ? mkMsg({ role: 'assistant', text: summaryText }) : m
+      ));
+      setPendingTool(null);
+    }
+  };
+
+  const handleToolCancel = async (msgId: string) => {
+    setMessages(prev => prev.map(m =>
+      m.id === msgId ? mkMsg({ role: 'assistant', text: 'Action cancelled.' }) : m
+    ));
+
+    if (pendingTool) {
+      const { conversationHistory, toolUseId } = pendingTool;
+      // Clear immediately per AC #1 — user has decided; input unblocks.
+      setPendingTool(null);
+      setLoading('chat');
+      callCountRef.current++;
+      const result = await sendToolResult(
+        conversationHistory, toolUseId, { success: false, reason: 'User cancelled' },
+        state, [...OKR_TOOLS, ...MIT_TOOLS], callCountRef.current,
+      );
+      handleToolsResult(result);
+      setLoading(null);
+    }
   };
 
   // ── STORY-039: Add MIT from ProposalCard ──────────────────────────────────
 
   const handleAddMIT = (mitText: string) => {
-    const today = todayISO();
-    const createdCount = state.dailyMITs.filter(m => m.date === today && m.carriedOverFrom === null).length;
-    if (createdCount >= 3) return;
+    const today   = todayISO();
+    const current = getLatestState().dailyMITs;
+    const createdCount = current.filter(m => m.date === today && m.carriedOverFrom === null).length;
+    if (createdCount >= 10) return;
     updateState({
-      dailyMITs: [...state.dailyMITs, {
+      dailyMITs: [...current, {
         id: crypto.randomUUID(), date: today, text: mitText,
-        status: 'pending', carriedOverFrom: null, carriedForwardTo: null, initiativeId: null,
+        status: 'pending', carriedOverFrom: null, carriedForwardTo: null, initiativeId: null, subtasks: [],
       }],
     });
   };
 
-  // Derive "added" state from persistent AppState, not ephemeral local state.
-  // This survives tab switches and prevents duplicate adds on re-entry.
   const getMITAdded = (mitText: string): boolean => {
     const today = todayISO();
-    return state.dailyMITs.some(m => m.date === today && m.text === mitText && m.carriedOverFrom === null);
+    // Only match pending MITs — a completed MIT with the same text should not
+    // block adding a fresh pending one, and should not show as "Added ✓".
+    return state.dailyMITs.some(
+      m => m.date === today && m.text === mitText && m.carriedOverFrom === null && m.status !== 'complete'
+    );
   };
 
   const todayMITCount = () =>
     state.dailyMITs.filter(m => m.date === todayISO() && m.carriedOverFrom === null).length;
 
-  // ── Render ProposalCard sections with actions ─────────────────────────────
-
   const buildProposalSections = (msg: Message): ProposalCardSection[] => {
     if (!msg.proposal) return [];
     return msg.proposal.sections.map(s => {
       if (msg.proposal!.type !== 'suggest-mits') return s;
-      const added = getMITAdded(s.content);
-      const capReached = todayMITCount() >= 3;
+      const added     = getMITAdded(s.content);
+      const capReached = todayMITCount() >= 10;
       return {
         ...s,
         action: (
@@ -261,7 +452,7 @@ export function CoachTab({ state, updateState, navigateToSetup }: CoachTabProps)
         </div>
       )}
 
-      {/* Structured action buttons (STORY-039, STORY-040) */}
+      {/* Structured action buttons */}
       <div style={{ display: 'flex', gap: 8, padding: '10px 16px', borderBottom: '1px solid var(--color-border)', flexWrap: 'wrap' }}>
         <button className="btn-ghost" style={{ fontSize: 12 }}
           disabled={!canAct}
@@ -299,13 +490,28 @@ export function CoachTab({ state, updateState, navigateToSetup }: CoachTabProps)
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <div key={i} style={{
+        {/* Tab-switch warning — shown in thread when tool card is pending */}
+        {hasPendingToolCard && (
+          <div style={{ textAlign: 'center', padding: '4px 16px 8px', fontSize: 12, color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+            Switching tabs will end this conversation.
+          </div>
+        )}
+
+        {messages.map((msg) => (
+          <div key={msg.id} style={{
             display: 'flex',
             justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
             padding: '4px 16px',
           }}>
-            {msg.proposal ? (
+            {msg.toolCard ? (
+              <ToolProposalCard
+                toolName={msg.toolCard.toolName}
+                toolInput={msg.toolCard.toolInput}
+                isDestructive={msg.toolCard.isDestructive}
+                onConfirm={() => handleToolConfirm(msg.id, msg.toolCard!)}
+                onCancel={() => handleToolCancel(msg.id)}
+              />
+            ) : msg.proposal ? (
               <ProposalCard
                 title={msg.proposal.type === 'suggest-mits' ? 'Proposed MITs' : 'Weekly Review'}
                 sections={buildProposalSections(msg)}
@@ -336,6 +542,17 @@ export function CoachTab({ state, updateState, navigateToSetup }: CoachTabProps)
         <div ref={bottomRef} />
       </div>
 
+      {/* Pending-tool warning strip — fixed above input area */}
+      {hasPendingToolCard && (
+        <div style={{
+          padding: '6px 16px', borderTop: '1px solid var(--color-border)',
+          background: 'color-mix(in srgb, var(--color-accent) 6%, var(--color-surface))',
+          fontSize: 12, color: 'var(--color-text-muted)', fontStyle: 'italic',
+        }}>
+          Waiting for your decision on the suggested action above.
+        </div>
+      )}
+
       {/* Input area */}
       <div style={{ borderTop: '1px solid var(--color-border)', padding: '12px 16px', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
         <div style={{ flex: 1, position: 'relative' }}>
@@ -344,9 +561,9 @@ export function CoachTab({ state, updateState, navigateToSetup }: CoachTabProps)
             className="input-base"
             rows={2}
             maxLength={500}
-            placeholder={!hasApiKey ? 'Add API key in Setup first' : !setupDone ? 'Complete Setup first' : 'Ask the Coach…'}
+            placeholder={!hasApiKey ? 'Add API key in Setup first' : !setupDone ? 'Complete Setup first' : hasPendingToolCard ? 'Resolve the action above first' : 'Ask the Coach…'}
             value={input}
-            disabled={!hasApiKey || !setupDone || loading !== null}
+            disabled={!hasApiKey || !setupDone || loading !== null || hasPendingToolCard}
             style={{ resize: 'none', paddingBottom: 18 }}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

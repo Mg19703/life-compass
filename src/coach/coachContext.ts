@@ -55,8 +55,8 @@ export function buildCoachContext(state: AppState, now: Date = new Date()): stri
   const quarter   = currentQuarter(month);
   const weekStart = snapToMonday(nowISO);
 
-  // 14-day window for MITs (trimmed from 30)
-  const mitWindowStart = addDays(nowISO, -13);
+  // 30-day window for MIT log (IDs needed for tool targeting across recent history)
+  const mitWindowStart = addDays(nowISO, -29);
 
   const sections: string[] = [];
 
@@ -119,9 +119,51 @@ export function buildCoachContext(state: AppState, now: Date = new Date()): stri
   }
   sections.push(krLines.join('\n'));
 
-  // ── Recent MITs: 14 days, incomplete + today only ────────────────────────
-  // Historical completed MITs add bulk with little coaching value.
-  // Keep: anything pending/carried/dropped, plus all of today's MITs.
+  // ── Tool-Targeting ID Block ───────────────────────────────────────────────
+  // Machine-readable JSON with IDs for current QOs, KRs, and today's MITs.
+  // Lets the model supply valid IDs when calling OKR and MIT tools.
+  // If the block exceeds 2000 tokens (large accounts), trim to today's MITs only.
+  const idPayload = {
+    currentObjectives: currentQOs.map(q => ({
+      id:          q.id,
+      title:       q.objective,
+      dimensionId: state.annualOKRs.find(o => o.id === q.annualOKRId)?.dimensionId ?? null,
+      quarter:     q.quarter,
+    })),
+    currentKeyResults: currentKRs.map(k => ({
+      id:          k.id,
+      title:       k.keyResult,
+      month:       k.month,
+      objectiveId: k.quarterlyObjectiveId,
+    })),
+    todayMITs: state.dailyMITs
+      .filter(m => m.date === nowISO)
+      .map(m => ({
+        id:          m.id,
+        text:        m.text,
+        done:        m.status === 'complete',
+        initiativeId: m.initiativeId,
+      })),
+  };
+
+  const idBlockStr   = JSON.stringify(idPayload, null, 2);
+  const idTokenCount = estimateTokens(idBlockStr);
+
+  if (idTokenCount > 2000) {
+    console.warn(`[life-compass] buildCoachContext: ID block ${idTokenCount} tokens — trimming to today's MITs only`);
+    const trimmedPayload = {
+      currentObjectives: [] as typeof idPayload.currentObjectives,
+      currentKeyResults: [] as typeof idPayload.currentKeyResults,
+      todayMITs:         idPayload.todayMITs,
+    };
+    sections.push(`## Tool IDs (trimmed — today's MITs only)\n\`\`\`json\n${JSON.stringify(trimmedPayload, null, 2)}\n\`\`\``);
+  } else {
+    sections.push(`## Tool IDs\n\`\`\`json\n${idBlockStr}\n\`\`\``);
+  }
+
+  // ── MIT Log: 30 days, open + today — id included for tool targeting ──────
+  // Completed MITs excluded except today's (keep history noise low).
+  // Entry format: date | id | text — status omitted to save tokens.
   const recentMITs = state.dailyMITs
     .filter(m =>
       m.date >= mitWindowStart &&
@@ -131,9 +173,9 @@ export function buildCoachContext(state: AppState, now: Date = new Date()): stri
     .sort((a, b) => a.date.localeCompare(b.date));
 
   sections.push([
-    '## Active MITs (last 14 days, incomplete + today)',
+    '## MIT Log (last 30 days, open + today)',
     recentMITs.length
-      ? recentMITs.map(m => `${m.date}: [${m.status}] ${m.text}`).join('\n')
+      ? recentMITs.map(m => `${m.date} | ${m.id} | ${m.text}`).join('\n')
       : '(no open MITs in this period)',
   ].join('\n'));
 

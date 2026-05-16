@@ -468,26 +468,23 @@ function DeathbedAlignmentSection({
         </thead>
         <tbody>
           {state.deathbedGoals.map((goal, i) => {
-            // Positional mapping: indices 0–5 → LIFE_DIMENSIONS, index 6 → Uncategorized
-            const dim   = i < 6 ? LIFE_DIMENSIONS[i] : null;
-            const dimId = dim?.id as DimensionId | undefined;
+            // STORY-063: read explicit user mapping instead of positional LIFE_DIMENSIONS fallback
+            const dimId   = ((state.deathbedGoalMappings ?? Array(7).fill(null))[i] ?? null) as DimensionId | null;
+            const dim     = dimId ? LIFE_DIMENSIONS.find(d => d.id === dimId) : null;
 
             const krCount  = dimId ? (krCounts.get(dimId)  ?? 0) : 0;
             const mitCount = dimId ? (mitCounts.get(dimId) ?? 0) : 0;
 
-            const status = !dimId ? 'absent'
-              : mitCount >= 1   ? 'active'
-              : krCount  >= 1   ? 'planned'
-                                : 'absent';
+            // Null mapping = Unassigned (user hasn't configured yet) — show grey, not red
+            const status: 'active' | 'planned' | 'absent' | 'uncategorized' = !dimId ? 'uncategorized'
+              : mitCount >= 1 ? 'active'
+              : krCount  >= 1 ? 'planned'
+                              : 'absent';
 
             const goalText    = goal.trim();
             const displayGoal = goalText
               ? (goalText.length > 60 ? goalText.slice(0, 60) + '…' : goalText)
               : '(not set)';
-
-            const uncategorizedTooltip = !dimId
-              ? 'Goals without a dimension mapping are not tracked in OKRs — this is expected.'
-              : undefined;
 
             return (
               <tr key={i}>
@@ -495,28 +492,28 @@ function DeathbedAlignmentSection({
                   style={{ color: goalText ? 'var(--color-text-primary)' : 'var(--color-text-muted)', fontStyle: goalText ? 'normal' : 'italic' }}>
                   {displayGoal}
                 </td>
-                <td style={{ color: 'var(--color-text-muted)', fontSize: 12 }}
-                  title={uncategorizedTooltip}>
-                  {dim?.label ?? 'Uncategorized'}
+                <td style={{ color: dimId ? 'var(--color-text-muted)' : 'var(--color-text-muted)', fontSize: 12, fontStyle: dimId ? 'normal' : 'italic' }}>
+                  {dim?.label ?? 'Unassigned'}
                 </td>
-                <td style={{ color: 'var(--color-text-muted)' }}>{krCount}</td>
-                <td style={{ color: 'var(--color-text-muted)' }}>{mitCount}</td>
-                <td title={uncategorizedTooltip ?? { active: 'Active', planned: 'Planned', absent: 'Absent' }[status]}>
-                  <span style={{
-                    color: !dimId ? dotColor.uncategorized : dotColor[status],
-                    fontSize: 16,
-                  }}>●</span>
+                <td style={{ color: 'var(--color-text-muted)' }}>{dimId ? krCount : '—'}</td>
+                <td style={{ color: 'var(--color-text-muted)' }}>{dimId ? mitCount : '—'}</td>
+                <td>
+                  <span style={{ color: dotColor[status], fontSize: 16 }}>●</span>
                 </td>
               </tr>
             );
           })}
         </tbody>
       </table>
-      <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
-        <button className="btn-ghost" style={{ fontSize: 12, padding: '2px 10px' }} onClick={navigateToSetup}>
-          Edit goals →
-        </button>
-      </div>
+      {/* Section-level note when any goal has no dimension mapping (STORY-063) */}
+      {state.deathbedGoals.some((_, i) => !(state.deathbedGoalMappings ?? [])[i]) && (
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--color-text-muted)' }}>
+          <span>Some goals are unassigned — map them to dimensions for alignment tracking.</span>
+          <button className="btn-ghost" style={{ fontSize: 12, padding: '1px 8px', flexShrink: 0 }} onClick={navigateToSetup}>
+            Go to Setup →
+          </button>
+        </div>
+      )}
     </>
   );
 }

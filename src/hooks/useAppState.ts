@@ -29,15 +29,18 @@ export function useAppState(): {
 
     const loaded = loadState();
 
-    // Normalize v2 array fields before the migration guard.
+    // Normalize array fields before the migration guard.
     // loadState() casts raw JSON directly to AppState — if the stored state has
-    // schemaVersion:2 but was saved before habits/habitLogs were added (e.g. during
-    // an incremental dev cycle), the migration guard fires false and the app receives
-    // an object with undefined arrays. This guard makes loading safe regardless.
+    // a current schemaVersion but was saved before a field was added (incremental
+    // dev cycle), the migration guard fires false and the app receives undefined
+    // arrays. This guard ensures array fields are always arrays on entry.
+    // Per-item shape backfill lives in the migration steps, not here.
     const normalized: typeof loaded = {
       ...loaded,
-      habits:    Array.isArray(loaded.habits)    ? loaded.habits    : [],
-      habitLogs: Array.isArray(loaded.habitLogs) ? loaded.habitLogs : [],
+      habits:               Array.isArray(loaded.habits)               ? loaded.habits               : [],
+      habitLogs:            Array.isArray(loaded.habitLogs)            ? loaded.habitLogs            : [],
+      dailyMITs:            Array.isArray(loaded.dailyMITs)            ? loaded.dailyMITs            : [],
+      deathbedGoalMappings: Array.isArray(loaded.deathbedGoalMappings) ? loaded.deathbedGoalMappings : Array(7).fill(null),
     };
 
     if (normalized.schemaVersion !== SCHEMA_VERSION) {

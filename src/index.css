@@ -127,6 +127,17 @@ html, body, #root {
   gap: 8px;
   margin-top: 4px;
 }
+
+/* ─── Shared inline button-group layout ──────────────────────────────────── */
+/* Layout only — no margin, padding, or color. Apply to inline action rows   */
+/* in tables and lists. For form-submit rows at the bottom of forms, use     */
+/* .form-actions which adds the correct margin-top.                           */
+.btn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .section-content { padding-bottom: 8px; }
 
 /* ─── Welcome banner ─────────────────────────────────────────────────────── */

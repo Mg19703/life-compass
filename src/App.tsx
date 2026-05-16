@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { TabId, PlanNavTarget } from './types';
+import { todayISO } from './utils/dateUtils';
 import { useAppState } from './hooks/useAppState';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { SetupTab } from './tabs/SetupTab';
@@ -40,17 +41,39 @@ export default function App() {
   return (
     <div className="app-shell">
       <nav className="tab-bar" role="tablist">
-        {TABS.map(({ id, label }) => (
-          <button
-            key={id}
-            role="tab"
-            aria-selected={activeTab === id}
-            className={`tab-btn${activeTab === id ? ' tab-btn--active' : ''}`}
-            onClick={() => setActiveTab(id)}
-          >
-            {label}
-          </button>
-        ))}
+        {TABS.map(({ id, label }) => {
+          const today = todayISO();
+          const todayMITs      = id === 'today' ? state.dailyMITs.filter(m => m.date === today) : [];
+          const todayCompleted = todayMITs.filter(m => m.status === 'complete').length;
+          const todayTotal     = Math.min(todayMITs.length, 10);
+          const showBadge      = id === 'today';
+
+          return (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={activeTab === id}
+              className={`tab-btn${activeTab === id ? ' tab-btn--active' : ''}`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              onClick={() => setActiveTab(id)}
+            >
+              {label}
+              {showBadge && (
+                <span
+                  aria-label={`${todayCompleted} of ${todayTotal} MITs done today`}
+                  style={{
+                    fontSize: 10, fontWeight: 700, lineHeight: 1.4,
+                    color: 'var(--color-accent)',
+                    background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)',
+                    padding: '1px 5px', borderRadius: 8,
+                  }}
+                >
+                  {todayCompleted}/{todayTotal}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </nav>
 
       <main className="tab-content">

@@ -1,6 +1,6 @@
-import type { AppState, LifeDimension } from './types';
+import type { AppState, DimensionId, LifeDimension } from './types';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const LIFE_DIMENSIONS: LifeDimension[] = [
   {
@@ -54,4 +54,5 @@ export const DEFAULT_APP_STATE: AppState = {
   apiKey: null,
   habits: [],
   habitLogs: [],
+  deathbedGoalMappings: Array(7).fill(null) as (DimensionId | null)[],
 };

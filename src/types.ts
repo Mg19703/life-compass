@@ -56,6 +56,9 @@ export interface WeeklyInitiative {
 // status is the sole completion signal — no completed: boolean on DailyMIT
 export type MITStatus = 'complete' | 'carried' | 'dropped' | 'pending';
 
+// v3: subtask on a DailyMIT — cap 10 per MIT
+export type Subtask = { id: string; text: string; done: boolean };
+
 export interface DailyMIT {
   id: string;
   date: ISODate;
@@ -64,6 +67,7 @@ export interface DailyMIT {
   carriedOverFrom: ISODate | null;
   carriedForwardTo: ISODate | null;
   initiativeId: string | null;
+  subtasks: Subtask[];
 }
 
 export interface Exercise {
@@ -125,4 +129,6 @@ export interface AppState {
   // v2 additions
   habits: Habit[];        // all habits (active and archived); archivedAt===null means active
   habitLogs: HabitLog[];  // flat array, queried by .habitId and .date
+  // v3 additions
+  deathbedGoalMappings: (DimensionId | null)[]; // length 7, parallel to deathbedGoals; null = unassigned
 }
