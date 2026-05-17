@@ -60,7 +60,17 @@ export function buildCoachContext(state: AppState, now: Date = new Date()): stri
   // 30-day window for MIT log (IDs needed for tool targeting across recent history)
   const mitWindowStart = addDays(nowISO, -29);
 
+  const nextWeekStart = addDays(weekStart, 7);
+
   const sections: string[] = [];
+
+  // ── Date Context ──────────────────────────────────────────────────────────
+  sections.push([
+    '## Date Context',
+    `Today: ${nowISO}`,
+    `Current week starts: ${weekStart}`,
+    `Next week starts: ${nextWeekStart}`,
+  ].join('\n'));
 
   // ── User Profile ─────────────────────────────────────────────────────────
   sections.push([

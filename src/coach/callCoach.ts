@@ -17,7 +17,7 @@ export interface CoachResponse {
 
 const API_URL     = 'https://api.anthropic.com/v1/messages';
 const MODEL       = 'claude-sonnet-4-6';
-const MAX_TOKENS  = 1024;
+const MAX_TOKENS  = 4096;
 const TIMEOUT_MS  = 30_000;
 
 // ─── STORY-020: Claude API integration ───────────────────────────────────────
