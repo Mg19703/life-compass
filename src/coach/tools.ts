@@ -138,7 +138,7 @@ const delete_monthly_kr: AnthropicTool = {
 
 const add_initiative: AnthropicTool = {
   name: 'add_initiative',
-  description: "Create a weekly initiative under a monthly key result. Use the KR ID from the Tool IDs block. Infer the target week from the user's message and supply any ISO date in that week as weekStart — the handler snaps it to the correct Monday. Do not call this tool unless the user has indicated which KR the initiative belongs to.",
+  description: "Create a weekly initiative under a monthly key result. Use the KR ID from the Tool IDs block. Infer the target week from the user's message and supply any ISO date in that week as weekStart — the handler snaps it to the correct Monday. Only call for the current week or future weeks — never for weeks whose Monday is before the current week start in the Date Context. Do not call this tool unless the user has indicated which KR the initiative belongs to.",
   input_schema: {
     type: 'object',
     properties: {

@@ -306,6 +306,13 @@ export function CoachTab({
       const rawWeek = typeof inp.weekStart === 'string' ? inp.weekStart : todayISO();
       const weekDate = new Date(rawWeek + 'T00:00:00');
       const targetWeek = isNaN(weekDate.getTime()) ? snapToMonday(todayISO()) : snapToMonday(rawWeek);
+      if (targetWeek < snapToMonday(todayISO())) {
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? mkMsg({ role: 'assistant', text: `Cannot add an initiative to a past week (${targetWeek}). Only the current or future weeks are allowed.`, error: true }) : m
+        ));
+        setPendingTool(null);
+        return;
+      }
       const currentInits = getLatestState().weeklyInitiatives;
       const weekCount = currentInits.filter(i => i.monthlyKRId === krId && i.weekStart === targetWeek).length;
       if (weekCount >= 4) {
