@@ -118,14 +118,23 @@ export function buildCoachContext(state: AppState, now: Date = new Date()): stri
   } else {
     for (const kr of currentKRs) {
       krLines.push(`- KR: ${kr.keyResult}`);
-      // Only include this week's initiatives — not all historical
-      const thisWeekInits = state.weeklyInitiatives.filter(
-        i => i.monthlyKRId === kr.id && i.weekStart === weekStart
-      );
-      if (thisWeekInits.length === 0) {
-        krLines.push('  - (no initiatives this week)');
+      // Show all this-month's initiatives grouped by week so the coach can
+      // see which weeks already have plans and which are still open.
+      const monthInits = state.weeklyInitiatives
+        .filter(i => i.monthlyKRId === kr.id)
+        .filter(i => {
+          const d = new Date(i.weekStart + 'T00:00:00');
+          return d.getFullYear() === year && d.getMonth() + 1 === month;
+        })
+        .sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+      if (monthInits.length === 0) {
+        krLines.push('  - (no initiatives planned this month)');
       } else {
-        thisWeekInits.forEach(i => krLines.push(`  - [${i.completed ? 'done' : 'open'}] ${i.text}`));
+        monthInits.forEach(i => {
+          const past = i.weekStart < weekStart;
+          const label = past ? 'past' : i.weekStart === weekStart ? 'this week' : 'upcoming';
+          krLines.push(`  - [${label}][${i.completed ? 'done' : 'open'}] week of ${i.weekStart}: ${i.text}`);
+        });
       }
     }
   }

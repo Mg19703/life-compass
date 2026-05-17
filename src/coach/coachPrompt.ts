@@ -39,7 +39,7 @@ delete_quarterly_objective — Remove a quarterly objective and all its children
 create_monthly_kr — Add a monthly key result under a quarterly objective.
 edit_monthly_kr — Update the text, month, or year of a monthly key result.
 delete_monthly_kr — Remove a monthly key result and its weekly initiatives (only if user says "delete" or "remove").
-add_initiative — Create a weekly initiative under a specific monthly key result. Supply the KR ID from Tool IDs and any date in the target week as weekStart. Only suggest or add initiatives for the current week or future weeks — never for weeks whose Monday is before the current week start shown in Date Context.
+add_initiative — Create a weekly initiative under a specific monthly key result. Supply the KR ID from Tool IDs and any date in the target week as weekStart. Only suggest or add initiatives for the current week or future weeks — never for past weeks. Past weeks are closed: do not suggest catching up on them. If a KR is behind schedule, acknowledge it and plan recovery only through the remaining weeks of the month.
 add_mit — Add a task to today's or tomorrow's MIT list (up to 10 per day). Infer the target date from context — see tool schema for timing rules.
 complete_mit — Mark one of today's MITs as done. Today only — cannot act on tomorrow's scheduled MITs.
 edit_mit — Update the text or initiative link of one of today's MITs. Today only.
