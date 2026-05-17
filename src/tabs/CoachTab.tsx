@@ -6,10 +6,9 @@ import type { AnthropicMessageParam, CallCoachWithToolsResult } from '../coach/t
 import { ProposalCard } from '../components/ProposalCard';
 import type { ProposalCardSection } from '../components/ProposalCard';
 import { ToolProposalCard } from '../components/ToolProposalCard';
-import { OKR_TOOLS, MIT_TOOLS, DESTRUCTIVE_TOOL_NAMES } from '../coach/tools';
+import { OKR_TOOLS, MIT_TOOLS, INITIATIVE_TOOLS, DESTRUCTIVE_TOOL_NAMES } from '../coach/tools';
 import { applyOKRTool } from '../coach/applyOKRTool';
-
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+import { todayISO, addDays, snapToMonday } from '../utils/dateUtils';
 
 // ─── Disclosure modal (Hard Gate: product-counsel) ────────────────────────────
 
@@ -55,9 +54,10 @@ interface ToolCardData {
   toolInput: unknown;
   isDestructive: boolean;
   toolUseId: string;
+  summaryOverride?: string;
 }
 
-interface Message {
+export interface Message {
   id: string; // UUID — used for in-place replacement on Confirm/Cancel
   role: 'user' | 'assistant';
   text: string;
@@ -73,7 +73,7 @@ function mkMsg(partial: Omit<Message, 'id'>): Message {
 
 // ─── Pending tool state ───────────────────────────────────────────────────────
 
-interface PendingTool {
+export interface PendingTool {
   toolUseId: string;
   conversationHistory: AnthropicMessageParam[];
 }
@@ -123,18 +123,26 @@ function parseWeeklyReview(text: string): { label: string; content: string }[] |
 interface CoachTabProps extends TabProps {
   navigateToSetup?: () => void;
   getLatestState: () => AppState;
+  messages: Message[];
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  pendingTool: PendingTool | null;
+  setPendingTool: React.Dispatch<React.SetStateAction<PendingTool | null>>;
+  coachHistory: AnthropicMessageParam[];
+  setCoachHistory: React.Dispatch<React.SetStateAction<AnthropicMessageParam[]>>;
 }
 
-export function CoachTab({ state, updateState, getLatestState, navigateToSetup }: CoachTabProps) {
+export function CoachTab({
+  state, updateState, getLatestState, navigateToSetup,
+  messages, setMessages, pendingTool, setPendingTool,
+  coachHistory, setCoachHistory,
+}: CoachTabProps) {
   const [disclosed, setDisclosed] = useState(
     () => localStorage.getItem(DISCLOSURE_KEY) === 'true'
   );
   const handleAccept = () => { localStorage.setItem(DISCLOSURE_KEY, 'true'); setDisclosed(true); };
 
-  const [messages, setMessages]     = useState<Message[]>([]);
-  const [input, setInput]           = useState('');
-  const [loading, setLoading]       = useState<'chat' | 'mits' | 'review' | null>(null);
-  const [pendingTool, setPendingTool] = useState<PendingTool | null>(null);
+  const [input, setInput]   = useState('');
+  const [loading, setLoading] = useState<'chat' | 'mits' | 'review' | null>(null);
   const bottomRef                   = useRef<HTMLDivElement>(null);
   const inputRef                    = useRef<HTMLTextAreaElement>(null);
   // callCount threaded via ref to avoid re-renders; reset per user message send
@@ -158,9 +166,28 @@ export function CoachTab({ state, updateState, getLatestState, navigateToSetup }
   const handleToolsResult = (result: CallCoachWithToolsResult) => {
     if (result.type === 'message') {
       setMessages(prev => [...prev, mkMsg({ role: 'assistant', text: result.text, error: result.error })]);
+      if (result.conversationHistory) setCoachHistory(result.conversationHistory);
     } else {
       // tool_use — render ToolProposalCard; store pending state
       const isDestructive = DESTRUCTIVE_TOOL_NAMES.has(result.toolName);
+
+      // Resolve a human-readable summary override for add_initiative so the card
+      // can show the KR title without ToolProposalCard needing state access.
+      let summaryOverride: string | undefined;
+      if (result.toolName === 'add_initiative' && typeof result.toolInput === 'object' && result.toolInput !== null) {
+        const i = result.toolInput as Record<string, unknown>;
+        const iText   = typeof i.text === 'string' ? i.text : '';
+        const rawWeek = typeof i.weekStart === 'string' ? i.weekStart : '';
+        const d = new Date(rawWeek + 'T00:00:00');
+        const weekLabel = isNaN(d.getTime())
+          ? rawWeek
+          : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const krTitle = typeof i.monthlyKRId === 'string'
+          ? state.monthlyKRs.find(k => k.id === i.monthlyKRId)?.keyResult ?? null
+          : null;
+        summaryOverride = `Add initiative · week of ${weekLabel}${iText ? `: "${iText}"` : ''}${krTitle ? `\nUnder: ${krTitle.slice(0, 70)}` : ''}`;
+      }
+
       setMessages(prev => [...prev, mkMsg({
         role: 'assistant', text: '',
         toolCard: {
@@ -168,9 +195,11 @@ export function CoachTab({ state, updateState, getLatestState, navigateToSetup }
           toolInput:   result.toolInput,
           isDestructive,
           toolUseId:   result.toolUseId,
+          summaryOverride,
         },
       })]);
       setPendingTool({ toolUseId: result.toolUseId, conversationHistory: result.conversationHistory });
+      setCoachHistory(result.conversationHistory);
     }
   };
 
@@ -183,7 +212,7 @@ export function CoachTab({ state, updateState, getLatestState, navigateToSetup }
     setMessages(prev => [...prev, mkMsg({ role: 'user', text })]);
     setLoading('chat');
     callCountRef.current = 0;
-    const result = await callCoachWithTools(text, state, [...OKR_TOOLS, ...MIT_TOOLS], callCountRef.current);
+    const result = await callCoachWithTools(text, state, [...OKR_TOOLS, ...MIT_TOOLS, ...INITIATIVE_TOOLS], callCountRef.current, coachHistory);
     callCountRef.current++;
     handleToolsResult(result);
     setLoading(null);
@@ -252,9 +281,161 @@ export function CoachTab({ state, updateState, getLatestState, navigateToSetup }
   const handleToolConfirm = async (msgId: string, toolCard: ToolCardData) => {
     const { toolName, toolInput } = toolCard;
     const inp = (typeof toolInput === 'object' && toolInput !== null ? toolInput : {}) as Record<string, unknown>;
-    const tools = [...OKR_TOOLS, ...MIT_TOOLS];
+    const tools = [...OKR_TOOLS, ...MIT_TOOLS, ...INITIATIVE_TOOLS];
 
-    // ── STORY-058: MIT tool handling ────────────────────────────────────────
+    // ── add_initiative ───────────────────────────────────────────────────────
+
+    if (toolName === 'add_initiative') {
+      const text = typeof inp.text === 'string' ? inp.text.trim() : '';
+      if (!text) {
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? mkMsg({ role: 'assistant', text: 'Could not add initiative — no text provided.', error: true }) : m
+        ));
+        setPendingTool(null);
+        return;
+      }
+      const krId = typeof inp.monthlyKRId === 'string' ? inp.monthlyKRId : '';
+      const kr = state.monthlyKRs.find(k => k.id === krId);
+      if (!kr) {
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? mkMsg({ role: 'assistant', text: 'KR not found — it may have been deleted or the ID is incorrect.', error: true }) : m
+        ));
+        setPendingTool(null);
+        return;
+      }
+      const rawWeek = typeof inp.weekStart === 'string' ? inp.weekStart : todayISO();
+      const weekDate = new Date(rawWeek + 'T00:00:00');
+      const targetWeek = isNaN(weekDate.getTime()) ? snapToMonday(todayISO()) : snapToMonday(rawWeek);
+      const currentInits = getLatestState().weeklyInitiatives;
+      const weekCount = currentInits.filter(i => i.monthlyKRId === krId && i.weekStart === targetWeek).length;
+      if (weekCount >= 4) {
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? mkMsg({ role: 'assistant', text: `That KR already has 4 initiatives for the week of ${targetWeek} — the maximum per KR per week.`, error: true }) : m
+        ));
+        setPendingTool(null);
+        return;
+      }
+      const newInit = { id: crypto.randomUUID(), monthlyKRId: krId, text, weekStart: targetWeek, completed: false };
+      const nextInits = [...currentInits, newInit];
+      const nextState = { ...state, weeklyInitiatives: nextInits };
+      updateState({ weeklyInitiatives: nextInits });
+      const summaryText = `Added initiative for week of ${targetWeek}: "${text}".`;
+      if (pendingTool) {
+        const { conversationHistory, toolUseId } = pendingTool;
+        setLoading('chat');
+        callCountRef.current++;
+        const followUpResult = await sendToolResult(conversationHistory, toolUseId, { success: true }, nextState, tools, callCountRef.current);
+        setPendingTool(null);
+        setMessages(prev => prev.map(m => m.id === msgId ? mkMsg({ role: 'assistant', text: summaryText }) : m));
+        if (followUpResult.type === 'message' && followUpResult.error) {
+          setMessages(prev => [...prev, mkMsg({ role: 'assistant', text: followUpResult.text, error: true })]);
+        } else { handleToolsResult(followUpResult); }
+        setLoading(null);
+      } else {
+        setMessages(prev => prev.map(m => m.id === msgId ? mkMsg({ role: 'assistant', text: summaryText }) : m));
+        setPendingTool(null);
+      }
+      return;
+    }
+
+    // ── add_mit ─────────────────────────────────────────────────────────────
+
+    if (toolName === 'add_mit') {
+      const text = typeof inp.text === 'string' ? inp.text.trim() : '';
+      if (!text) {
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? mkMsg({ role: 'assistant', text: 'Could not add task — no text provided.', error: true }) : m
+        ));
+        setPendingTool(null);
+        return;
+      }
+      const isTomorrow = inp.target_date === 'tomorrow';
+      const targetDate = isTomorrow ? addDays(todayISO(), 1) : todayISO();
+      const label = isTomorrow ? 'tomorrow' : 'today';
+      const currentMITs = getLatestState().dailyMITs;
+      const capCount = currentMITs.filter(m => m.date === targetDate && m.carriedOverFrom === null).length;
+      if (capCount >= 10) {
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? mkMsg({ role: 'assistant', text: `MIT cap reached — already have 10 tasks for ${label}.`, error: true }) : m
+        ));
+        setPendingTool(null);
+        return;
+      }
+      const newMIT = {
+        id: crypto.randomUUID(), date: targetDate, text,
+        status: 'pending' as const, carriedOverFrom: null, carriedForwardTo: null,
+        initiativeId: ('initiativeId' in inp ? inp.initiativeId as string | null : null),
+        subtasks: [],
+      };
+      const nextMITs = [...currentMITs, newMIT];
+      const nextState = { ...state, dailyMITs: nextMITs };
+      updateState({ dailyMITs: nextMITs });
+      const summaryText = isTomorrow
+        ? `Added to tomorrow's MITs: "${text}". It'll appear in your Today tab starting tomorrow.`
+        : `Added: "${text}".`;
+      if (pendingTool) {
+        const { conversationHistory, toolUseId } = pendingTool;
+        setLoading('chat');
+        callCountRef.current++;
+        const result = await sendToolResult(conversationHistory, toolUseId, { success: true }, nextState, tools, callCountRef.current);
+        setPendingTool(null);
+        setMessages(prev => prev.map(m => m.id === msgId ? mkMsg({ role: 'assistant', text: summaryText }) : m));
+        if (result.type === 'message' && result.error) {
+          setMessages(prev => [...prev, mkMsg({ role: 'assistant', text: result.text, error: true })]);
+        } else { handleToolsResult(result); }
+        setLoading(null);
+      } else {
+        setMessages(prev => prev.map(m => m.id === msgId ? mkMsg({ role: 'assistant', text: summaryText }) : m));
+        setPendingTool(null);
+      }
+      return;
+    }
+
+    // ── complete_mit ─────────────────────────────────────────────────────────
+
+    if (toolName === 'complete_mit') {
+      const mitId = typeof inp.mitId === 'string' ? inp.mitId : '';
+      const mit   = state.dailyMITs.find(m => m.id === mitId);
+      if (!mit) {
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? mkMsg({ role: 'assistant', text: 'Task not found — it may have been deleted.' }) : m
+        ));
+        setPendingTool(null);
+        return;
+      }
+      if (mit.date !== todayISO()) {
+        const futureMsg = mit.date > todayISO()
+          ? "That MIT is scheduled for a future date — you can modify it once that date arrives."
+          : "The Coach can only modify today's MITs.";
+        setMessages(prev => prev.map(m =>
+          m.id === msgId ? mkMsg({ role: 'assistant', text: futureMsg, error: true }) : m
+        ));
+        setPendingTool(null);
+        return;
+      }
+      const nextMITs  = state.dailyMITs.map(m => m.id !== mitId ? m : { ...m, status: 'complete' as const });
+      const nextState = { ...state, dailyMITs: nextMITs };
+      updateState({ dailyMITs: nextMITs });
+      const summaryText = `Marked done: "${mit.text}".`;
+      if (pendingTool) {
+        const { conversationHistory, toolUseId } = pendingTool;
+        setLoading('chat');
+        callCountRef.current++;
+        const result = await sendToolResult(conversationHistory, toolUseId, { success: true }, nextState, tools, callCountRef.current);
+        setPendingTool(null);
+        setMessages(prev => prev.map(m => m.id === msgId ? mkMsg({ role: 'assistant', text: summaryText }) : m));
+        if (result.type === 'message' && result.error) {
+          setMessages(prev => [...prev, mkMsg({ role: 'assistant', text: result.text, error: true })]);
+        } else { handleToolsResult(result); }
+        setLoading(null);
+      } else {
+        setMessages(prev => prev.map(m => m.id === msgId ? mkMsg({ role: 'assistant', text: summaryText }) : m));
+        setPendingTool(null);
+      }
+      return;
+    }
+
+    // ── edit_mit / delete_mit ────────────────────────────────────────────────
 
     const isMITTool = toolName === 'edit_mit' || toolName === 'delete_mit';
     if (isMITTool) {
@@ -270,8 +451,11 @@ export function CoachTab({ state, updateState, getLatestState, navigateToSetup }
       }
 
       if (mit.date !== todayISO()) {
+        const futureMsg = mit.date > todayISO()
+          ? "That MIT is scheduled for a future date — you can modify it once that date arrives."
+          : "The Coach can only modify today's MITs.";
         setMessages(prev => prev.map(m =>
-          m.id === msgId ? mkMsg({ role: 'assistant', text: 'The Coach can only modify today\'s MITs.', error: true }) : m
+          m.id === msgId ? mkMsg({ role: 'assistant', text: futureMsg, error: true }) : m
         ));
         setPendingTool(null);
         return;
@@ -377,7 +561,7 @@ export function CoachTab({ state, updateState, getLatestState, navigateToSetup }
       callCountRef.current++;
       const result = await sendToolResult(
         conversationHistory, toolUseId, { success: false, reason: 'User cancelled' },
-        state, [...OKR_TOOLS, ...MIT_TOOLS], callCountRef.current,
+        state, [...OKR_TOOLS, ...MIT_TOOLS, ...INITIATIVE_TOOLS], callCountRef.current,
       );
       handleToolsResult(result);
       setLoading(null);
@@ -386,6 +570,16 @@ export function CoachTab({ state, updateState, getLatestState, navigateToSetup }
 
   // ── STORY-039: Add MIT from ProposalCard ──────────────────────────────────
 
+  // Strip rationale that the model appends after the task name.
+  // Handles " — rationale" (em dash) and "Task text. Rationale sentence." patterns.
+  const trimToTask = (text: string): string => {
+    const emDash = text.indexOf(' — ');
+    if (emDash !== -1) return text.slice(0, emDash).trim();
+    const sentenceBoundary = text.search(/\.\s+[A-Z]/);
+    if (sentenceBoundary !== -1) return text.slice(0, sentenceBoundary + 1).trim();
+    return text.trim();
+  };
+
   const handleAddMIT = (mitText: string) => {
     const today   = todayISO();
     const current = getLatestState().dailyMITs;
@@ -393,7 +587,7 @@ export function CoachTab({ state, updateState, getLatestState, navigateToSetup }
     if (createdCount >= 10) return;
     updateState({
       dailyMITs: [...current, {
-        id: crypto.randomUUID(), date: today, text: mitText,
+        id: crypto.randomUUID(), date: today, text: trimToTask(mitText),
         status: 'pending', carriedOverFrom: null, carriedForwardTo: null, initiativeId: null, subtasks: [],
       }],
     });
@@ -401,10 +595,11 @@ export function CoachTab({ state, updateState, getLatestState, navigateToSetup }
 
   const getMITAdded = (mitText: string): boolean => {
     const today = todayISO();
+    const task  = trimToTask(mitText);
     // Only match pending MITs — a completed MIT with the same text should not
     // block adding a fresh pending one, and should not show as "Added ✓".
     return state.dailyMITs.some(
-      m => m.date === today && m.text === mitText && m.carriedOverFrom === null && m.status !== 'complete'
+      m => m.date === today && m.text === task && m.carriedOverFrom === null && m.status !== 'complete'
     );
   };
 
@@ -508,6 +703,7 @@ export function CoachTab({ state, updateState, getLatestState, navigateToSetup }
                 toolName={msg.toolCard.toolName}
                 toolInput={msg.toolCard.toolInput}
                 isDestructive={msg.toolCard.isDestructive}
+                summaryOverride={msg.toolCard.summaryOverride}
                 onConfirm={() => handleToolConfirm(msg.id, msg.toolCard!)}
                 onCancel={() => handleToolCancel(msg.id)}
               />

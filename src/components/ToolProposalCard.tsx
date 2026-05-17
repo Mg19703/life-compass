@@ -10,6 +10,8 @@ interface ToolProposalCardProps {
   isDestructive: boolean;
   /** Human-readable name of the item being deleted — shown in the second-step prompt */
   destructiveLabel?: string;
+  /** Pre-resolved summary string from the caller — overrides buildSummary when present */
+  summaryOverride?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -44,6 +46,14 @@ function buildSummary(toolName: string, toolInput: unknown): string {
         return `Edit key result${text ? ` → ${text}` : ''}`;
       case 'delete_monthly_kr':
         return 'Delete key result';
+      case 'add_initiative': {
+        const week = typeof i.weekStart === 'string' ? i.weekStart : '?';
+        return `Add initiative · week of ${week}${text ? `: "${text}"` : ''}`;
+      }
+      case 'add_mit': {
+        const td = i.target_date === 'tomorrow' ? 'tomorrow' : 'today';
+        return `Add MIT for ${td}${text ? `: ${text}` : ''}`;
+      }
       case 'edit_mit':
         return `Edit task${text ? `: ${text}` : ''}`;
       case 'delete_mit':
@@ -57,10 +67,10 @@ function buildSummary(toolName: string, toolInput: unknown): string {
 }
 
 export function ToolProposalCard({
-  toolName, toolInput, isDestructive, destructiveLabel, onConfirm, onCancel,
+  toolName, toolInput, isDestructive, destructiveLabel, summaryOverride, onConfirm, onCancel,
 }: ToolProposalCardProps) {
   const [step, setStep] = useState<'initial' | 'confirming' | 'applying'>('initial');
-  const summary  = buildSummary(toolName, toolInput);
+  const summary  = summaryOverride ?? buildSummary(toolName, toolInput);
   const applying = step === 'applying';
 
   const handleFirstConfirm = () => {
@@ -86,7 +96,7 @@ export function ToolProposalCard({
       maxWidth: 520,
       fontSize: 13,
     }}>
-      <p style={{ color: 'var(--color-text-primary)', lineHeight: 1.55, marginBottom: 12 }}>
+      <p style={{ color: 'var(--color-text-primary)', lineHeight: 1.55, marginBottom: 12, whiteSpace: 'pre-line' }}>
         {summary}
       </p>
 

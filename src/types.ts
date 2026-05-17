@@ -80,6 +80,7 @@ export interface DailyLog {
   mood: 1 | 2 | 3 | 4 | 5;
   note: string;
   exercise: Exercise | null;
+  carriedTurmoilFrom: ISODate | null; // v4: set when user acknowledges a low-mood carryover
 }
 
 // v2: Habits (recurring daily behaviors, separate from MITs and OKRs)
@@ -131,4 +132,6 @@ export interface AppState {
   habitLogs: HabitLog[];  // flat array, queried by .habitId and .date
   // v3 additions
   deathbedGoalMappings: (DimensionId | null)[]; // length 7, parallel to deathbedGoals; null = unassigned
+  // v4 additions
+  turmoilDismissedFor: ISODate | null; // date of yesterday's log that triggered and was actioned
 }

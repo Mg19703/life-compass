@@ -166,7 +166,12 @@ async function dispatchToAnthropic(
     const toolBlock   = content.find(c => c.type === 'tool_use');
 
     if (stopReason === 'end_turn') {
-      return { type: 'message', text: (textBlock?.text as string | undefined) ?? '' };
+      const assistantTurn: AnthropicMessageParam = { role: 'assistant', content };
+      return {
+        type:                'message',
+        text:                (textBlock?.text as string | undefined) ?? '',
+        conversationHistory: [...messages, assistantTurn].slice(-20),
+      };
     }
 
     if (stopReason === 'tool_use') {
@@ -206,10 +211,11 @@ async function dispatchToAnthropic(
 }
 
 export async function callCoachWithTools(
-  userMessage: string,
-  state:       AppState,
-  tools:       AnthropicTool[],
-  callCount    = 0,
+  userMessage:  string,
+  state:        AppState,
+  tools:        AnthropicTool[],
+  callCount     = 0,
+  priorHistory: AnthropicMessageParam[] = [],
 ): Promise<CallCoachWithToolsResult> {
   const apiKey = state.apiKey;
   if (!apiKey) return { type: 'message', text: 'Invalid API key — update it in Setup.', error: true };
@@ -220,7 +226,7 @@ export async function callCoachWithTools(
   }
 
   const system   = SYSTEM_PROMPT.replace('{{CONTEXT}}', context);
-  const messages: AnthropicMessageParam[] = [{ role: 'user', content: userMessage }];
+  const messages: AnthropicMessageParam[] = [...priorHistory, { role: 'user', content: userMessage }];
 
   return dispatchToAnthropic(messages, system, apiKey, tools, callCount);
 }

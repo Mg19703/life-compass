@@ -47,9 +47,32 @@ function migrateV2toV3(partial: Record<string, unknown>): Record<string, unknown
   return { ...partial, dailyMITs: migratedMITs, deathbedGoalMappings, schemaVersion: 3 };
 }
 
+function migrateV3toV4(partial: Record<string, unknown>): Record<string, unknown> {
+  // v4 adds turmoilDismissedFor to AppState and carriedTurmoilFrom to every DailyLog.
+  const rawLogs =
+    typeof partial.dailyLogs === 'object' && partial.dailyLogs !== null
+      ? (partial.dailyLogs as Record<string, unknown>)
+      : {};
+
+  const migratedLogs: Record<string, unknown> = {};
+  for (const [date, log] of Object.entries(rawLogs)) {
+    if (typeof log === 'object' && log !== null) {
+      migratedLogs[date] = { carriedTurmoilFrom: null, ...(log as object) };
+    }
+  }
+
+  return {
+    ...partial,
+    dailyLogs: migratedLogs,
+    turmoilDismissedFor: null,
+    schemaVersion: 4,
+  };
+}
+
 const VERSION_MIGRATIONS: Record<number, (s: Record<string, unknown>) => Record<string, unknown>> = {
   1: migrateV1toV2,
   2: migrateV2toV3,
+  3: migrateV3toV4,
 };
 
 // ─── Top-level migrate() ──────────────────────────────────────────────────────

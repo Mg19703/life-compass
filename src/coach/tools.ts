@@ -134,7 +134,49 @@ const delete_monthly_kr: AnthropicTool = {
   },
 };
 
+// ─── Initiative tools ─────────────────────────────────────────────────────────
+
+const add_initiative: AnthropicTool = {
+  name: 'add_initiative',
+  description: "Create a weekly initiative under a monthly key result. Use the KR ID from the Tool IDs block. Infer the target week from the user's message and supply any ISO date in that week as weekStart — the handler snaps it to the correct Monday. Do not call this tool unless the user has indicated which KR the initiative belongs to.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      text:        { type: 'string', description: 'The initiative text.' },
+      monthlyKRId: { type: 'string', description: 'ID of the parent monthly key result, from the Tool IDs block.' },
+      weekStart:   { type: 'string', description: 'Any ISO date (YYYY-MM-DD) in the target week — handler snaps it to Monday.' },
+    },
+    required: ['text', 'monthlyKRId', 'weekStart'],
+  },
+};
+
 // ─── MIT tools ────────────────────────────────────────────────────────────────
+
+const add_mit: AnthropicTool = {
+  name: 'add_mit',
+  description: "Add a new Most Important Task to today's or tomorrow's list (maximum 10 per day). Use target_date 'today' (default — also omit when the user makes no timing reference) or 'tomorrow' (use when the user says \"tomorrow\" or \"tonight\"). For any other time reference (e.g. \"Friday\", \"next week\", \"in three days\"), do NOT call this tool — explain in text that only today and tomorrow are supported and offer to add for one of those.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      text:         { type: 'string',           description: 'The task text.' },
+      initiativeId: { type: ['string', 'null'], description: 'Weekly initiative ID to link, or null for no link (optional).' },
+      target_date:  { type: 'string', enum: ['today', 'tomorrow'], description: "Which day to schedule the task. Omit or use 'today' for the current date; use 'tomorrow' for the next calendar day." },
+    },
+    required: ['text'],
+  },
+};
+
+const complete_mit: AnthropicTool = {
+  name: 'complete_mit',
+  description: "Mark one of today's Most Important Tasks as done. Use when the user explicitly says they finished or completed a task.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      mitId: { type: 'string', description: "The ID of the MIT to mark complete." },
+    },
+    required: ['mitId'],
+  },
+};
 
 const edit_mit: AnthropicTool = {
   name: 'edit_mit',
@@ -185,16 +227,20 @@ export const OKR_TOOLS: AnthropicTool[] = [
 ];
 
 export const MIT_TOOLS: AnthropicTool[] = [
+  add_mit,
+  complete_mit,
   edit_mit,
   delete_mit,
 ];
 
+export const INITIATIVE_TOOLS: AnthropicTool[] = [add_initiative];
+
 // ─── Uniqueness assertion (caught at import time in dev) ──────────────────────
-const _allTools = [...OKR_TOOLS, ...MIT_TOOLS];
+const _allTools = [...OKR_TOOLS, ...MIT_TOOLS, ...INITIATIVE_TOOLS];
 if (import.meta.env.DEV) {
   const names = _allTools.map(t => t.name);
   const unique = new Set(names);
-  if (names.length !== 11 || unique.size !== 11) {
-    console.error('[life-compass] tools.ts: expected 11 unique tool names, got', names.length, 'with', unique.size, 'unique', names);
+  if (names.length !== unique.size) {
+    console.error('[life-compass] tools.ts: duplicate tool names detected', names.filter((n, i) => names.indexOf(n) !== i));
   }
 }

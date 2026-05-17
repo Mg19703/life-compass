@@ -8,6 +8,8 @@ import { TodayTab } from './tabs/TodayTab';
 import { PlanTab } from './tabs/PlanTab';
 import { ReviewTab } from './tabs/ReviewTab';
 import { CoachTab } from './tabs/CoachTab';
+import type { Message, PendingTool } from './tabs/CoachTab';
+import type { AnthropicMessageParam } from './coach/callCoach';
 import { HabitsTab } from './tabs/HabitsTab';
 import './App.css';
 
@@ -27,6 +29,15 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>(defaultTab);
 
   const [planNavTarget, setPlanNavTarget] = useState<PlanNavTarget | null>(null);
+
+  // Coach conversation — lives here so it survives tab switches within a session.
+  // Resets on page reload (not persisted to localStorage).
+  const [coachMessages,    setCoachMessages]    = useState<Message[]>([]);
+  const [coachPendingTool, setCoachPendingTool] = useState<PendingTool | null>(null);
+  const [coachHistory,     setCoachHistory]     = useState<AnthropicMessageParam[]>([]);
+
+  // Carryover turmoil defer — session-only, not persisted. Cleared on page reload.
+  const [turmoilDeferredUntil, setTurmoilDeferredUntil] = useState<string | null>(null);
 
   const navigateToPlan = (target: PlanNavTarget) => {
     setPlanNavTarget(target);
@@ -78,13 +89,26 @@ export default function App() {
 
       <main className="tab-content">
         {activeTab === 'setup'  && <ErrorBoundary tabLevel><SetupTab  {...tabProps} /></ErrorBoundary>}
-        {activeTab === 'today'  && <ErrorBoundary tabLevel><TodayTab  {...tabProps} navigateToHabits={navigateToHabits} navigateToPlan={() => setActiveTab('plan')} /></ErrorBoundary>}
+        {activeTab === 'today'  && <ErrorBoundary tabLevel><TodayTab  {...tabProps} navigateToHabits={navigateToHabits} navigateToPlan={() => setActiveTab('plan')} turmoilDeferredUntil={turmoilDeferredUntil} setTurmoilDeferredUntil={setTurmoilDeferredUntil} /></ErrorBoundary>}
         {activeTab === 'plan'   && (
           <ErrorBoundary tabLevel>
             <PlanTab {...tabProps} navTarget={planNavTarget} onNavConsumed={() => setPlanNavTarget(null)} />
           </ErrorBoundary>
         )}
-        {activeTab === 'coach'  && <ErrorBoundary tabLevel><CoachTab  {...tabProps} navigateToSetup={navigateToSetup} /></ErrorBoundary>}
+        {activeTab === 'coach'  && (
+          <ErrorBoundary tabLevel>
+            <CoachTab
+              {...tabProps}
+              navigateToSetup={navigateToSetup}
+              messages={coachMessages}
+              setMessages={setCoachMessages}
+              pendingTool={coachPendingTool}
+              setPendingTool={setCoachPendingTool}
+              coachHistory={coachHistory}
+              setCoachHistory={setCoachHistory}
+            />
+          </ErrorBoundary>
+        )}
         {activeTab === 'review' && (
           <ErrorBoundary tabLevel>
             <ReviewTab {...tabProps} navigateToPlan={navigateToPlan} navigateToSetup={navigateToSetup} />

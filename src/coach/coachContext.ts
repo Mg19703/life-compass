@@ -7,7 +7,9 @@ export const COACH_SETUP_INCOMPLETE = 'User has not yet completed Setup';
 
 // ─── Date utilities (local — avoids cross-module deps) ────────────────────────
 
-function isoDate(d: Date): string { return d.toISOString().slice(0, 10); }
+function isoDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 function addDays(iso: string, n: number): string {
   const d = new Date(iso + 'T00:00:00');
@@ -168,14 +170,14 @@ export function buildCoachContext(state: AppState, now: Date = new Date()): stri
     .filter(m =>
       m.date >= mitWindowStart &&
       m.date <= nowISO &&
-      (m.status !== 'complete' || m.date === nowISO)
+      m.status !== 'complete'
     )
     .sort((a, b) => a.date.localeCompare(b.date));
 
   sections.push([
-    '## MIT Log (last 30 days, open + today)',
+    '## MIT Log (last 30 days, open only)',
     recentMITs.length
-      ? recentMITs.map(m => `${m.date} | ${m.id} | ${m.text}`).join('\n')
+      ? recentMITs.map(m => `${m.date} | [${m.status}] | ${m.id} | ${m.text}`).join('\n')
       : '(no open MITs in this period)',
   ].join('\n'));
 

@@ -106,6 +106,7 @@ function WeeklyInitiativesSection({ krId, state, updateState }: { krId: string }
   const [newText, setNewText] = useState('');
   const [newWeek, setNewWeek] = useState(snapToMonday(todayISO()));
   const [addError, setAddError] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const initiatives = state.weeklyInitiatives
@@ -126,6 +127,11 @@ function WeeklyInitiativesSection({ krId, state, updateState }: { krId: string }
   const toggleComplete = (id: string, completed: boolean) =>
     updateState({ weeklyInitiatives: state.weeklyInitiatives.map(i => i.id === id ? { ...i, completed } : i) });
 
+  const handleSaveEdit = (id: string, text: string) => {
+    updateState({ weeklyInitiatives: state.weeklyInitiatives.map(i => i.id === id ? { ...i, text } : i) });
+    setEditingId(null);
+  };
+
   return (
     <div>
       <button className="expand-row" onClick={() => setExpanded(e => !e)}>
@@ -144,9 +150,18 @@ function WeeklyInitiativesSection({ krId, state, updateState }: { krId: string }
                   {initiatives.map(i => (
                     <tr key={i.id} style={{ opacity: i.completed ? 0.55 : 1 }}>
                       <td style={{ color: 'var(--color-text-muted)', whiteSpace: 'nowrap', fontSize: 12 }}>{i.weekStart}</td>
-                      <td style={{ textDecoration: i.completed ? 'line-through' : 'none' }}>{i.text}</td>
+                      <td style={{ textDecoration: i.completed ? 'line-through' : 'none' }}>
+                        {editingId === i.id
+                          ? <InlineEdit initial={i.text} onSave={v => handleSaveEdit(i.id, v)} onCancel={() => setEditingId(null)} />
+                          : i.text}
+                      </td>
                       <td><input type="checkbox" checked={i.completed} style={{ accentColor: 'var(--color-accent)' }} onChange={e => toggleComplete(i.id, e.target.checked)} /></td>
-                      <td><button className="btn-ghost" style={{ padding: '1px 6px', fontSize: 11 }} onClick={() => setDeleteTarget(i.id)}>✕</button></td>
+                      <td>
+                        <span style={{ display: 'flex', gap: 4 }}>
+                          <button className="btn-ghost" style={{ padding: '1px 6px', fontSize: 11 }} onClick={() => setEditingId(i.id)}>✎</button>
+                          <button className="btn-ghost" style={{ padding: '1px 6px', fontSize: 11 }} onClick={() => setDeleteTarget(i.id)}>✕</button>
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

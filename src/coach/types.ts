@@ -21,7 +21,7 @@ export type AnthropicMessageParam = {
 // ─── callCoachWithTools return type ───────────────────────────────────────────
 
 export type CallCoachWithToolsResult =
-  | { type: 'message'; text: string; error?: boolean }
+  | { type: 'message'; text: string; error?: boolean; conversationHistory?: AnthropicMessageParam[] }
   | {
       type: 'tool_use';
       toolName: string;

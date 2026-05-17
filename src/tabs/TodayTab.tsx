@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import type { TabProps, DailyMIT, DailyLog, WeeklyInitiative, MonthlyKeyResult } from '../types';
+import { useState, useRef } from 'react';
+import type { AppState, TabProps, DailyMIT, DailyLog } from '../types';
 import { EmptyState } from '../components/EmptyState';
 import { calculateStreak } from '../utils/habitUtils';
 import { DateNavBar } from '../components/DateNavBar';
@@ -7,7 +7,10 @@ import { InitiativeDropdown } from '../components/InitiativeDropdown';
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 function addDays(iso: string, n: number): string {
   const d = new Date(iso + 'T00:00:00');
@@ -33,12 +36,13 @@ function formatCarryFrom(iso: string): string {
 const newId = () => crypto.randomUUID();
 
 // ─── STORY-016: Daily Log Section ────────────────────────────────────────────
-// Rendered with key={activeDate} so local state resets on date navigation.
+// Rendered with key={activeDate + forcedMood} so local state resets on date navigation
+// and when a carryover mood is applied by the banner.
 
-function DailyLogSection({ activeDate, state, updateState }: { activeDate: string } & TabProps) {
+function DailyLogSection({ activeDate, state, updateState, initialMood }: { activeDate: string; initialMood?: 1 | 2 | 3 | 4 | 5 | null } & TabProps) {
   const existing = state.dailyLogs[activeDate];
 
-  const [mood, setMood] = useState<1 | 2 | 3 | 4 | 5 | null>(existing?.mood ?? null);
+  const [mood, setMood] = useState<1 | 2 | 3 | 4 | 5 | null>(initialMood ?? existing?.mood ?? null);
   const [exType, setExType]   = useState(existing?.exercise?.type ?? '');
   const [exMins, setExMins]   = useState(existing?.exercise != null ? String(existing.exercise.durationMinutes) : '');
   const [note, setNote]       = useState(existing?.note ?? '');
@@ -49,7 +53,10 @@ function DailyLogSection({ activeDate, state, updateState }: { activeDate: strin
     const exercise = exType.trim()
       ? { type: exType.trim(), durationMinutes: Number(exMins) || 0 }
       : null;
-    const log: DailyLog = { date: activeDate, mood, exercise, note: note.trim() };
+    const log: DailyLog = {
+      date: activeDate, mood, exercise, note: note.trim(),
+      carriedTurmoilFrom: existing?.carriedTurmoilFrom ?? null,
+    };
     updateState({ dailyLogs: { ...state.dailyLogs, [activeDate]: log } });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -58,6 +65,17 @@ function DailyLogSection({ activeDate, state, updateState }: { activeDate: strin
   return (
     <div>
       <div className="section-divider">Daily Log</div>
+
+      {existing?.carriedTurmoilFrom && (
+        <div style={{
+          marginBottom: 10, padding: '5px 10px',
+          borderLeft: '2px solid var(--color-accent)',
+          background: 'color-mix(in srgb, var(--color-accent) 8%, transparent)',
+          borderRadius: 4, fontSize: 12, color: 'var(--color-text-muted)',
+        }}>
+          Low mood carried from {formatCarryFrom(existing.carriedTurmoilFrom)}
+        </div>
+      )}
 
       <div className="form-field">
         <span className="form-label">Mood</span>
@@ -279,24 +297,26 @@ const mitStatusLabel = (s: DailyMIT['status']) =>
 interface MITCardProps {
   mit: DailyMIT;
   activeDate: string;
+  appState: AppState;
   onComplete: (id: string) => void;
   onRestore: (id: string) => void;
+  onDelete: (id: string) => void;
   onAddSubtask: (text: string) => void;
   onDeleteSubtask: (subtaskId: string) => void;
-  onToggleSubtask: (subtaskId: string, done: boolean) => void;    // STORY-048
-  onSaveInitiativeLink: (initiativeId: string | null) => void;   // STORY-051
-  weeklyInitiatives: WeeklyInitiative[];                          // STORY-051
-  monthlyKRs: MonthlyKeyResult[];                                 // STORY-051
+  onToggleSubtask: (subtaskId: string, done: boolean) => void;
+  onSaveInitiativeLink: (initiativeId: string | null) => void;
+  onSaveText: (text: string) => void;
 }
 
 function MITCard({
-  mit, activeDate,
-  onComplete, onRestore, onAddSubtask, onDeleteSubtask, onToggleSubtask,
-  onSaveInitiativeLink, weeklyInitiatives, monthlyKRs,
+  mit, activeDate, appState,
+  onComplete, onRestore, onDelete, onAddSubtask, onDeleteSubtask, onToggleSubtask,
+  onSaveInitiativeLink, onSaveText,
 }: MITCardProps) {
   const [openMode, setOpenMode]             = useState<'subtasks' | 'edit' | null>(null);
   const [newSubtask, setNewSubtask]         = useState('');
   const [editInitiativeId, setEditInitId]   = useState<string | null>(null);
+  const [editText, setEditText]             = useState(mit.text);
 
   const subtasks    = mit.subtasks ?? [];
   const total       = subtasks.length;
@@ -310,13 +330,9 @@ function MITCard({
   const panelOpen   = openMode === 'subtasks';
   const editOpen    = openMode === 'edit';
 
-  // Initiative name for subtitle (STORY-051)
   const linkedInitiative = mit.initiativeId
-    ? weeklyInitiatives.find(i => i.id === mit.initiativeId)
+    ? appState.weeklyInitiatives.find(i => i.id === mit.initiativeId)
     : null;
-
-  // Narrow cast — InitiativeDropdown only reads weeklyInitiatives and monthlyKRs
-  const miniState = { weeklyInitiatives, monthlyKRs } as unknown as import('../types').AppState;
 
   const handleAddSubtask = () => {
     const text = newSubtask.trim();
@@ -326,20 +342,19 @@ function MITCard({
   };
 
   const handleEnterEdit = () => {
+    setEditText(mit.text);
     setEditInitId(mit.initiativeId);
     setOpenMode('edit');
   };
   const handleSaveEdit = () => {
-    // Null out stale IDs silently — if the linked initiative no longer exists,
-    // writing the dead ID back would leave a dangling reference.
-    const validId = editInitiativeId !== null && weeklyInitiatives.some(i => i.id === editInitiativeId)
+    if (editText.trim()) onSaveText(editText.trim());
+    const validId = editInitiativeId !== null && appState.weeklyInitiatives.some(i => i.id === editInitiativeId)
       ? editInitiativeId
       : null;
     onSaveInitiativeLink(validId);
     setOpenMode(null);
   };
   const handleCancelEdit = () => {
-    // key={activeDate} resets state on date navigation — silent discard is acceptable here
     setEditInitId(null);
     setOpenMode(null);
   };
@@ -383,17 +398,28 @@ function MITCard({
           )}
         </div>
 
-        {/* Edit trigger — today's pending MITs only (STORY-051) */}
+        {/* Edit + delete — today's pending MITs only */}
         {mit.status === 'pending' && !isPastDate && (
-          <button
-            type="button"
-            onClick={handleEnterEdit}
-            title="Edit initiative link"
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px',
-              color: 'var(--color-text-muted)', fontSize: 13, flexShrink: 0,
-            }}
-          >✎</button>
+          <>
+            <button
+              type="button"
+              onClick={handleEnterEdit}
+              title="Edit initiative link"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px',
+                color: 'var(--color-text-muted)', fontSize: 13, flexShrink: 0,
+              }}
+            >✎</button>
+            <button
+              type="button"
+              onClick={() => onDelete(mit.id)}
+              title="Delete MIT"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px',
+                color: 'var(--color-text-muted)', fontSize: 13, flexShrink: 0,
+              }}
+            >✕</button>
+          </>
         )}
 
         {/* Subtask toggle — always visible on today's pending MITs; shows X/Y count only when subtasks exist */}
@@ -436,17 +462,26 @@ function MITCard({
         )}
       </div>
 
-      {/* Edit panel — initiative link (STORY-051) */}
+      {/* Edit panel — text + initiative link */}
       {editOpen && (
         <div style={{ background: 'var(--color-bg)', padding: '8px 10px 10px 26px' }}>
+          <input
+            className="input-base"
+            value={editText}
+            maxLength={150}
+            autoFocus
+            style={{ width: '100%', marginBottom: 6, fontSize: 13 }}
+            onChange={e => setEditText(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(); if (e.key === 'Escape') handleCancelEdit(); }}
+          />
           <InitiativeDropdown
             value={editInitiativeId}
             onChange={setEditInitId}
-            appState={miniState}
+            appState={appState}
             activeDate={activeDate}
           />
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <button className="btn-primary" style={{ fontSize: 12, padding: '3px 10px' }} onClick={handleSaveEdit}>Save</button>
+            <button className="btn-primary" style={{ fontSize: 12, padding: '3px 10px' }} onClick={handleSaveEdit} disabled={!editText.trim()}>Save</button>
             <button className="btn-ghost"   style={{ fontSize: 12, padding: '3px 10px' }} onClick={handleCancelEdit}>Cancel</button>
           </div>
         </div>
@@ -528,6 +563,110 @@ function MITCard({
   );
 }
 
+// ─── Carryover Turmoil Banner ────────────────────────────────────────────────
+// Fires when yesterday's mood was <= 2 and the user hasn't actioned it yet.
+// Trigger is evaluated once at mount via useRef — does not re-fire mid-session.
+
+function CarryoverTurmoilBanner({
+  activeDate, state, updateState,
+  turmoilDeferredUntil, setTurmoilDeferredUntil,
+  onStillFeelingIt,
+}: {
+  activeDate: string;
+  state: AppState;
+  updateState: (partial: Partial<AppState>) => void;
+  turmoilDeferredUntil: string | null;
+  setTurmoilDeferredUntil: (d: string | null) => void;
+  onStillFeelingIt: (mood: 1 | 2 | 3 | 4 | 5) => void;
+}) {
+  const today     = todayISO();
+  const yesterday = addDays(today, -1);
+  const yLog      = state.dailyLogs[yesterday];
+
+  const shouldShowRef = useRef(
+    activeDate === today &&
+    yLog !== undefined &&
+    typeof yLog.mood === 'number' &&
+    yLog.mood >= 1 && yLog.mood <= 2 &&
+    state.turmoilDismissedFor !== yesterday &&
+    turmoilDeferredUntil !== today,
+  );
+
+  const [phase, setPhase] = useState<'prompt' | 'confirm-still' | 'confirm-moving'>('prompt');
+  const [selfDismissed, setSelfDismissed] = useState(false);
+
+  if (!shouldShowRef.current || selfDismissed) return null;
+
+  const bannerStyle: React.CSSProperties = {
+    marginBottom: 16, padding: '10px 14px',
+    borderLeft: '3px solid var(--color-accent)',
+    background: 'color-mix(in srgb, var(--color-accent) 8%, transparent)',
+    borderRadius: 4,
+  };
+
+  if (phase === 'confirm-still') {
+    return (
+      <div style={bannerStyle}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)' }}>
+          Got it. Today's mood pre-set. You can change it anytime.
+        </p>
+      </div>
+    );
+  }
+
+  if (phase === 'confirm-moving') {
+    return (
+      <div style={bannerStyle}>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)' }}>Good. Fresh start.</p>
+      </div>
+    );
+  }
+
+  const todayAlreadyLogged = state.dailyLogs[today] !== undefined;
+
+  const handleStillFeelingIt = () => {
+    const todayLog = state.dailyLogs[today];
+    const updatedLog: DailyLog = todayLog
+      ? { ...todayLog, carriedTurmoilFrom: yesterday }
+      : { date: today, mood: yLog.mood as 1|2|3|4|5, note: '', exercise: null, carriedTurmoilFrom: yesterday };
+    updateState({ dailyLogs: { ...state.dailyLogs, [today]: updatedLog }, turmoilDismissedFor: yesterday });
+    if (!todayAlreadyLogged) onStillFeelingIt(yLog.mood as 1|2|3|4|5);
+    setPhase('confirm-still');
+    setTimeout(() => setSelfDismissed(true), 3000);
+  };
+
+  const handleMovingOn = () => {
+    updateState({ turmoilDismissedFor: yesterday });
+    setPhase('confirm-moving');
+    setTimeout(() => setSelfDismissed(true), 2000);
+  };
+
+  const handleDefer = () => {
+    setTurmoilDeferredUntil(today);
+    setSelfDismissed(true);
+  };
+
+  return (
+    <div style={bannerStyle}>
+      <p style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 500 }}>Yesterday looked rough.</p>
+      <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--color-text-muted)' }}>
+        Want to carry that forward, or leave it behind?
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button className="btn-ghost" style={{ fontSize: 12, padding: '3px 10px' }} onClick={handleStillFeelingIt}>
+          {todayAlreadyLogged ? 'Note it' : 'Still feeling it'}
+        </button>
+        <button className="btn-ghost" style={{ fontSize: 12, padding: '3px 10px' }} onClick={handleMovingOn}>
+          Moving on
+        </button>
+        <button className="btn-ghost" style={{ fontSize: 12, padding: '3px 10px', color: 'var(--color-text-muted)', borderColor: 'var(--color-border)' }} onClick={handleDefer}>
+          Ask me later
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── STORY-014: MIT Section ───────────────────────────────────────────────────
 // Rendered with key={activeDate} so local form state resets on date navigation.
 
@@ -561,6 +700,9 @@ function MITSection({ activeDate, state, updateState, navigateToHabits, navigate
   const handleRestore = (id: string) =>
     updateState({ dailyMITs: state.dailyMITs.map(m => m.id === id ? { ...m, status: 'pending' as const } : m) });
 
+  const handleDelete = (id: string) =>
+    updateState({ dailyMITs: state.dailyMITs.filter(m => m.id !== id) });
+
   const handleAddSubtask = (mitId: string, text: string) =>
     updateState({
       dailyMITs: state.dailyMITs.map(m =>
@@ -588,6 +730,11 @@ function MITSection({ activeDate, state, updateState, navigateToHabits, navigate
       ),
     });
 
+  const handleSaveText = (mitId: string, text: string) =>
+    updateState({
+      dailyMITs: state.dailyMITs.map(m => m.id !== mitId ? m : { ...m, text }),
+    });
+
   const handleSaveInitiativeLink = (mitId: string, initiativeId: string | null) =>
     updateState({
       dailyMITs: state.dailyMITs.map(m => m.id !== mitId ? m : { ...m, initiativeId }),
@@ -608,14 +755,15 @@ function MITSection({ activeDate, state, updateState, navigateToHabits, navigate
           key={mit.id}
           mit={mit}
           activeDate={activeDate}
+          appState={state}
           onComplete={handleComplete}
           onRestore={handleRestore}
+          onDelete={handleDelete}
           onAddSubtask={text => handleAddSubtask(mit.id, text)}
           onDeleteSubtask={subtaskId => handleDeleteSubtask(mit.id, subtaskId)}
           onToggleSubtask={(subtaskId, done) => handleToggleSubtask(mit.id, subtaskId, done)}
+          onSaveText={text => handleSaveText(mit.id, text)}
           onSaveInitiativeLink={initiativeId => handleSaveInitiativeLink(mit.id, initiativeId)}
-          weeklyInitiatives={state.weeklyInitiatives}
-          monthlyKRs={state.monthlyKRs}
         />
       ))}
 
@@ -661,12 +809,18 @@ function MITSection({ activeDate, state, updateState, navigateToHabits, navigate
 interface TodayTabProps extends TabProps {
   navigateToHabits: () => void;
   navigateToPlan?: () => void;
+  turmoilDeferredUntil: string | null;
+  setTurmoilDeferredUntil: (d: string | null) => void;
 }
 
-export function TodayTab({ state, updateState, navigateToHabits, navigateToPlan }: TodayTabProps) {
+export function TodayTab({ state, updateState, navigateToHabits, navigateToPlan, turmoilDeferredUntil, setTurmoilDeferredUntil }: TodayTabProps) {
   const today  = todayISO();
   const minDay = addDays(today, -30);
   const [activeDate, setActiveDate] = useState(today);
+
+  // forcedMood: set by banner PATH A to pre-populate today's DailyLog mood.
+  // Changing it forces DailyLogSection to remount with the new initial value.
+  const [forcedMood, setForcedMood] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
 
   const isToday  = activeDate === today;
   const isAtMin  = activeDate === minDay;
@@ -686,11 +840,20 @@ export function TodayTab({ state, updateState, navigateToHabits, navigateToPlan 
         style={{ marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid var(--color-border)' }}
       />
 
+      <CarryoverTurmoilBanner
+        activeDate={activeDate}
+        state={state}
+        updateState={updateState}
+        turmoilDeferredUntil={turmoilDeferredUntil}
+        setTurmoilDeferredUntil={setTurmoilDeferredUntil}
+        onStillFeelingIt={mood => setForcedMood(mood)}
+      />
+
       {/* MIT section — key resets local form state on date switch */}
       <MITSection key={activeDate} activeDate={activeDate} state={state} updateState={updateState} navigateToHabits={navigateToHabits} navigateToPlan={navigateToPlan} />
 
-      {/* Daily log — key resets local form state on date switch */}
-      <DailyLogSection key={`log-${activeDate}`} activeDate={activeDate} state={state} updateState={updateState} />
+      {/* Daily log — key resets on date switch and when banner pre-populates mood */}
+      <DailyLogSection key={`log-${activeDate}-${forcedMood ?? 'x'}`} activeDate={activeDate} state={state} updateState={updateState} initialMood={forcedMood} />
     </div>
   );
 }

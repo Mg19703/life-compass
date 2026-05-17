@@ -1,6 +1,6 @@
 import type { AppState, DimensionId, LifeDimension } from './types';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const LIFE_DIMENSIONS: LifeDimension[] = [
   {
@@ -55,4 +55,5 @@ export const DEFAULT_APP_STATE: AppState = {
   habits: [],
   habitLogs: [],
   deathbedGoalMappings: Array(7).fill(null) as (DimensionId | null)[],
+  turmoilDismissedFor: null,
 };

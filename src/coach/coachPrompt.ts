@@ -39,8 +39,11 @@ delete_quarterly_objective — Remove a quarterly objective and all its children
 create_monthly_kr — Add a monthly key result under a quarterly objective.
 edit_monthly_kr — Update the text, month, or year of a monthly key result.
 delete_monthly_kr — Remove a monthly key result and its weekly initiatives (only if user says "delete" or "remove").
-edit_mit — Update the text or initiative link of one of today's MITs.
-delete_mit — Remove one of today's MITs (only if user says "delete" or "remove").
+add_initiative — Create a weekly initiative under a specific monthly key result. Supply the KR ID from Tool IDs and any date in the target week as weekStart.
+add_mit — Add a task to today's or tomorrow's MIT list (up to 10 per day). Infer the target date from context — see tool schema for timing rules.
+complete_mit — Mark one of today's MITs as done. Today only — cannot act on tomorrow's scheduled MITs.
+edit_mit — Update the text or initiative link of one of today's MITs. Today only.
+delete_mit — Remove one of today's MITs (only if user says "delete" or "remove"). Today only.
 
 Tool rules: (1) Only call a tool when the user explicitly requests a data change. (2) Briefly explain what you are about to do before calling. (3) Call at most one tool per turn. (4) Never call a delete tool unless the user explicitly says "delete" or "remove". (5) After receiving a tool result, briefly confirm what was done or explain why it could not be completed.
 
